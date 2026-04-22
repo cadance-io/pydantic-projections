@@ -158,9 +158,10 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 
 ## Semantics
 
-- **Extras are ignored** on deserialisation (`extra="ignore"`).
-- **`from_attributes=True`** — accepts dicts, JSON, or arbitrary objects that expose the Protocol's members.
+- **Extras are ignored** on deserialisation (`extra="ignore"`). This is a hard invariant — passing `extra="forbid"` via `config=` does not override it.
+- **`from_attributes=True`** — accepts dicts, JSON, or arbitrary objects that expose the Protocol's members. Also a hard invariant.
 - **Projections are immutable by default** (`frozen=True`). Pass `frozen=False` for a mutable variant.
+- **`frozen` and `config=` propagate to nested projections** — an alias generator or `frozen` flag applied at the top level also applies to every Protocol reachable through containers and unions.
 - **Optional widening** is allowed: source `name: str` is accepted by a Protocol declaring `name: str | None`.
 - **Narrowing** is not: if the source value is `None` for a Protocol field typed `str`, validation raises.
 - **Classes are cached** per `(protocol, config, frozen)` via `functools.cache`.

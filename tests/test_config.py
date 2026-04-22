@@ -72,3 +72,23 @@ def describe_projection_config():
 
             with pytest.raises(TypeError, match="hashable"):
                 projection(_Simple, config=bad_config)
+
+    def when_config_tries_to_set_extra_to_forbid():
+        def it_is_ignored_and_extras_stay_accepted():
+            cls = projection(_Simple, config=ConfigDict(extra="forbid"))
+
+            assert cls.model_config.get("extra") == "ignore"
+            instance = cls.model_validate({"x": 1, "rogue": "dropped"})
+            assert instance.x == 1
+            assert not hasattr(instance, "rogue")
+
+    def when_config_tries_to_disable_from_attributes():
+        def it_is_ignored_and_object_inputs_still_validate():
+            cls = projection(_Simple, config=ConfigDict(from_attributes=False))
+
+            assert cls.model_config.get("from_attributes") is True
+
+            class _Obj:
+                x = 1
+
+            assert cls.model_validate(_Obj()).x == 1

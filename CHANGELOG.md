@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **BREAKING**: `projection(...)` now defaults to `frozen=True`. A projection is a derived view of its source, so mutation is almost always a bug; projections are now immutable by default and are hashable (usable as `dict` keys / in `set`s). Pass `frozen=False` to restore the previous behaviour.
 
+### Fixed
+- `frozen` and `config=` now propagate into nested Protocol projections. Previously only the top-level projection inherited these settings, so an alias generator applied at the outer level silently skipped nested models and a frozen outer projection still permitted mutation of its inner projections.
+- `ConfigDict(extra=...)` and `ConfigDict(from_attributes=...)` passed via `config=` no longer override the library's `extra="ignore"` / `from_attributes=True` invariants.
+
+### Changed
+- Nested projections are now cached under the outer `(frozen, config)` tuple, so each distinct outer configuration produces its own inner projection class. Previously all nested classes for a given Protocol were a single shared instance.
+
 ## [0.2.0] - 2026-04-22
 
 ### Added

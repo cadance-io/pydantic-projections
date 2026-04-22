@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Protocol
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from pydantic_projections import ProjectionError, project
+from pydantic_projections import ProjectionError, project, projection
 
 
 class _Summary(Protocol):
@@ -42,3 +42,38 @@ def describe_project_errors():
                 project(BadSource(), _Summary)
 
             assert isinstance(exc_info.value.validation_error, ValidationError)
+
+
+def describe_projection_build_errors():
+    def when_the_protocol_has_no_annotated_members():
+        def it_raises_a_type_error():
+            class _Empty(Protocol):
+                pass
+
+            with pytest.raises(TypeError, match="nothing to project"):
+                projection(_Empty)
+
+    def when_the_protocol_references_an_unresolved_forward_name():
+        def it_raises_a_type_error():
+            class _Unresolvable(Protocol):
+                ref: "DefinitelyNotDefined"  # type: ignore[name-defined]  # noqa: F821, UP037
+
+            with pytest.raises(TypeError, match="_Unresolvable"):
+                projection(_Unresolvable)
+
+    def when_a_property_on_the_protocol_has_no_return_annotation():
+        def it_is_silently_skipped():
+            class _Src(BaseModel):
+                name: str
+
+            class _OnlyUntypedProp(Protocol):
+                name: str
+
+                @property
+                def untyped(self):  # type: ignore[no-untyped-def]
+                    return "x"
+
+            cls = projection(_OnlyUntypedProp)
+
+            assert "untyped" not in cls.model_fields
+            assert cls.model_validate(_Src(name="Alice")).name == "Alice"

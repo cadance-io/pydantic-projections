@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, Union
 
 from pydantic import BaseModel, computed_field
 
@@ -70,3 +70,13 @@ class UserWithAddressDict(Protocol):
 class UserWithOptionalAddress(Protocol):
     id: int
     shipping: AddressSummary | None
+
+
+class UserWithAddressTuple(Protocol):
+    id: int
+    past_addresses: tuple[AddressSummary, ...]
+
+
+class UserWithAddressUnion(Protocol):
+    id: int
+    address: Union[AddressSummary, int]  # noqa: UP007 — exercises typing.Union branch

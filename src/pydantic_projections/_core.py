@@ -124,7 +124,7 @@ def _build(
     hints = _collect_field_hints(protocol)
 
     fields: dict[str, Any] = {
-        name: (_substitute(annotation), ...)
+        name: (_substitute(annotation, frozen, config_items), ...)
         for name, annotation in hints.items()
         if not name.startswith("_")
     }
@@ -135,9 +135,11 @@ def _build(
             "annotated members; nothing to project."
         )
 
-    cfg: dict[str, Any] = {"extra": "ignore", "from_attributes": True}
+    cfg: dict[str, Any] = {}
     if config_items is not None:
         cfg.update(dict(config_items))
+    cfg["extra"] = "ignore"
+    cfg["from_attributes"] = True
     cfg["frozen"] = frozen
 
     return create_model(
@@ -180,17 +182,26 @@ def _is_protocol(t: Any) -> bool:
     )
 
 
-def _substitute(annotation: Any) -> Any:
-    """Replace Protocol references inside ``annotation`` with their projections."""
+def _substitute(
+    annotation: Any,
+    frozen: bool,
+    config_items: tuple[tuple[str, Any], ...] | None,
+) -> Any:
+    """Replace Protocol references inside ``annotation`` with their projections.
+
+    Nested projections inherit the outer ``frozen`` flag and ``config`` so a
+    configuration applied at the top level (e.g. an ``alias_generator``) also
+    applies to every Protocol reachable through containers and unions.
+    """
     if _is_protocol(annotation):
-        return _build(annotation, False, None)
+        return _build(annotation, frozen, config_items)
 
     origin = get_origin(annotation)
     if origin is None:
         return annotation
 
     args = get_args(annotation)
-    new_args = tuple(_substitute(a) for a in args)
+    new_args = tuple(_substitute(a, frozen, config_items) for a in args)
     if new_args == args:
         return annotation
 
