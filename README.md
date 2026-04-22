@@ -1,5 +1,9 @@
 # pydantic-projections
 
+[![PyPI](https://img.shields.io/pypi/v/pydantic-projections.svg)](https://pypi.org/project/pydantic-projections/)
+[![CI](https://github.com/cadance-io/pydantic-projections/actions/workflows/ci.yml/badge.svg)](https://github.com/cadance-io/pydantic-projections/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/pypi/pyversions/pydantic-projections.svg)](https://pypi.org/project/pydantic-projections/)
+
 Elegant projection of Pydantic `BaseModel`s through Python `Protocol`s — serialise and deserialise only the fields a Protocol declares, nothing more.
 
 ## Install
@@ -12,7 +16,7 @@ pip install pydantic-projections
 
 ## Why
 
-You have a fat `BaseModel` for internal use, and you want to expose only a subset of its fields over an API, to a logging system, or to a downstream consumer. Pydantic already lets you do this with `model_dump(include=...)`, but that's stringly-typed and type-unsafe. A `Protocol` describes the shape you want; `pydantic-projections` turns that Protocol into a real BaseModel at runtime, cached once per Protocol.
+You have a fat `BaseModel` for internal use, and you want to expose only a subset of its fields over an API, to a logging system, or to a downstream consumer. Pydantic already lets you do this with `model_dump(include=...)`, but that's stringly-typed and type-unsafe. A `Protocol` describes the shape you want; `pydantic-projections` turns that Protocol into a real BaseModel at runtime, cached per `(protocol, frozen, config)` triple.
 
 ## Usage
 
@@ -52,7 +56,7 @@ SummaryModel.model_json_schema()
 
 ### Nested protocols and containers
 
-Protocols can reference other Protocols. The projection is built recursively, so `list[P]`, `dict[str, P]`, `P | None`, and plain `P` all work:
+Protocols can reference other Protocols. The projection is built recursively, so `list[P]`, `dict[str, P]`, `tuple[P, ...]`, `P | None`, `Union[P, ...]`, and plain `P` all work:
 
 ```python
 class AddressSummary(Protocol):
@@ -107,6 +111,22 @@ project(user, UserDisplay).display_name  # -> "User: Alice"
 
 `project(instance, Proto)` is typed to return `Proto`, so `summary.name` resolves to `str` in mypy/pyright without a cast. At runtime the object is a `BaseModel` subclass that structurally satisfies the Protocol.
 
+### FastAPI `response_model`
+
+`projection(Proto)` returns a real BaseModel class, so it drops into FastAPI's `response_model` unchanged — the endpoint's output is pruned to the Protocol's fields and the OpenAPI schema matches:
+
+```python
+from fastapi import FastAPI
+from pydantic_projections import projection
+
+app = FastAPI()
+
+
+@app.get("/users/{id}", response_model=projection(UserSummary))
+def get_user(id: int) -> User:
+    return db.get_user(id)  # returns the fat User; caller sees only UserSummary's fields
+```
+
 ### Config pass-through and `frozen`
 
 Projections are **immutable by default** (`frozen=True`): a projection is a derived view of its source, so attempting `instance.x = ...` raises `ValidationError`. Opt back into mutation with `frozen=False` if you need it. Merge additional `ConfigDict` options (e.g. alias generator for camelCase output) via `config=`:
@@ -122,6 +142,8 @@ CamelSummary = projection(
 
 MutableSummary = projection(UserSummary, frozen=False)
 ```
+
+`frozen` and `config` propagate into every Protocol reachable from the outer one, so an alias generator applied at the top level also camelCases nested projections. `extra="ignore"` and `from_attributes=True` are hard invariants — user-supplied `ConfigDict` cannot override them.
 
 Classes are cached per `(protocol, config, frozen)` triple; config values must be hashable.
 
@@ -166,7 +188,7 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 - **Narrowing** is not: if the source value is `None` for a Protocol field typed `str`, validation raises.
 - **Classes are cached** per `(protocol, config, frozen)` via `functools.cache`.
 
-## Limitations (v0.1)
+## Limitations
 
 - Cyclic Protocols (a Protocol that references itself transitively) are not supported and will recurse.
 - Generic Protocols (`Protocol[T]`) with unresolved `TypeVar`s are not supported.
@@ -178,7 +200,7 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 uv sync
 uv run pytest
 uv run python scripts/validate_tests.py
-uv run ruff check src/ tests/
+uv run ruff check src/ tests/ scripts/
 uv run mypy src/
 uv run coverage run -m pytest && uv run coverage report
 ```
