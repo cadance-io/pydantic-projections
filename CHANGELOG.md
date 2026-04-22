@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-22
+
+### Changed
+- **BREAKING**: `projection(...)` now defaults to `frozen=True`. A projection is a derived view of its source, so mutation is almost always a bug; projections are now immutable by default and are hashable (usable as `dict` keys / in `set`s). Pass `frozen=False` to restore the previous behaviour.
+
 ## [0.2.0] - 2026-04-22
 
 ### Added

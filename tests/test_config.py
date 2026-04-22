@@ -35,16 +35,26 @@ def describe_projection_config():
             dumped = result.model_dump(by_alias=True)
             assert dumped == {"userId": 1, "fullName": "Alice"}
 
-    def when_frozen_is_true():
+    def when_frozen_is_the_default():
         def it_rejects_mutation():
-            cls = projection(_Simple, frozen=True)
+            cls = projection(_Simple)
 
             instance = cls.model_validate({"x": 1})
             with pytest.raises(ValidationError):
                 instance.x = 2
 
-        def it_caches_separately_from_the_unfrozen_variant():
-            assert projection(_Simple, frozen=True) is not projection(_Simple)
+    def when_frozen_is_false():
+        def it_allows_mutation():
+            cls = projection(_Simple, frozen=False)
+
+            instance = cls.model_validate({"x": 1})
+            instance.x = 2
+            assert instance.x == 2
+
+        def it_caches_separately_from_the_frozen_variant():
+            assert projection(_Simple, frozen=False) is not projection(
+                _Simple, frozen=True
+            )
 
     def when_the_same_config_is_passed_twice():
         def it_returns_the_same_cached_class():

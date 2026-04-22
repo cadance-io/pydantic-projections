@@ -109,7 +109,7 @@ project(user, UserDisplay).display_name  # -> "User: Alice"
 
 ### Config pass-through and `frozen`
 
-Merge additional `ConfigDict` options (e.g. alias generator for camelCase output) and/or request an immutable projection:
+Projections are **immutable by default** (`frozen=True`): a projection is a derived view of its source, so attempting `instance.x = ...` raises `ValidationError`. Opt back into mutation with `frozen=False` if you need it. Merge additional `ConfigDict` options (e.g. alias generator for camelCase output) via `config=`:
 
 ```python
 from pydantic import ConfigDict
@@ -118,8 +118,9 @@ from pydantic.alias_generators import to_camel
 CamelSummary = projection(
     UserSummary,
     config=ConfigDict(alias_generator=to_camel, populate_by_name=True),
-    frozen=True,
 )
+
+MutableSummary = projection(UserSummary, frozen=False)
 ```
 
 Classes are cached per `(protocol, config, frozen)` triple; config values must be hashable.
@@ -159,6 +160,7 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 
 - **Extras are ignored** on deserialisation (`extra="ignore"`).
 - **`from_attributes=True`** — accepts dicts, JSON, or arbitrary objects that expose the Protocol's members.
+- **Projections are immutable by default** (`frozen=True`). Pass `frozen=False` for a mutable variant.
 - **Optional widening** is allowed: source `name: str` is accepted by a Protocol declaring `name: str | None`.
 - **Narrowing** is not: if the source value is `None` for a Protocol field typed `str`, validation raises.
 - **Classes are cached** per `(protocol, config, frozen)` via `functools.cache`.

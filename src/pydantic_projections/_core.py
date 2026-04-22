@@ -42,16 +42,17 @@ def projection(
     protocol: type[P],
     *,
     config: ConfigDict | None = None,
-    frozen: bool = False,
+    frozen: bool = True,
 ) -> type[BaseModel]:
     """Build (or fetch the cached) Pydantic model that mirrors a Protocol's fields.
 
     By default the returned class ignores unknown fields on input
-    (``extra="ignore"``) and supports validation from plain attributes
-    (``from_attributes=True``). Nested Protocols and containers of Protocols are
-    recursively projected. Pass ``config`` to merge additional ``ConfigDict``
-    options (e.g. ``alias_generator``) and ``frozen=True`` for an immutable
-    projection.
+    (``extra="ignore"``), supports validation from plain attributes
+    (``from_attributes=True``), and is **immutable** (``frozen=True``), since a
+    projection is a derived view of its source rather than a live entity.
+    Nested Protocols and containers of Protocols are recursively projected.
+    Pass ``config`` to merge additional ``ConfigDict`` options (e.g.
+    ``alias_generator``) and ``frozen=False`` to opt back in to mutation.
 
     The result is cached per ``(protocol, config, frozen)``. Config values must
     be hashable.

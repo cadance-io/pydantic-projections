@@ -1,6 +1,6 @@
 [project]
 name = "pydantic-projections"
-version = "0.2.0"
+version = "0.3.0"
 description = "Elegant projection of Pydantic BaseModels through Python Protocols."
 readme = "README.md"
 license = "MIT"
