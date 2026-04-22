@@ -1,0 +1,48 @@
+default_language_version:
+  python: python3.11
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.2
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pip-audit
+        name: pip-audit
+        language: system
+        entry: bash -c 'uv export --no-hashes --no-dev --format requirements-txt | uv run --with pip-audit pip-audit -r /dev/stdin'
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+      - id: validate-tests
+        name: validate tests
+        entry: bash -c "uv run python scripts/validate_tests.py"
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: mypy
+        name: mypy
+        language: system
+        entry: uv run mypy src/
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+      - id: jscpd
+        name: jscpd
+        language: system
+        entry: npx jscpd src/ tests/ --min-tokens 30 --min-lines 2 --threshold 5
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/|tests/)
+      - id: pytest
+        name: pytest
+        language: system
+        entry: bash -c 'uv run coverage run -m pytest && uv run coverage report'
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/|tests/)
