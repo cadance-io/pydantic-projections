@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ProjectedResponse` — FastAPI response class that serializes a source instance through a Protocol straight to JSON bytes, bypassing FastAPI's `serialize_response` + `jsonable_encoder` + `json.dumps` chain. Benchmarked ~2–4× faster than the `response_model=projection(...)` baseline on raw ser/deser work (varies by FastAPI version and response shape). Raises `ProjectionError` at construction time if the source does not satisfy the Protocol. Import from `pydantic_projections` (lazy); requires the `fastapi` optional extra.
+- `project_json_bytes(instance, protocol, **kwargs) -> bytes` — emits JSON bytes via the projection class's Rust-backed serializer, skipping the `str` intermediate that `model_dump_json().encode()` goes through.
+- Optional `fastapi` install extra: `pip install pydantic-projections[fastapi]`.
+- `benches/` suite driven by `pytest-benchmark` for measuring the projection and render paths.
+
+### Changed
+- `project()` and `project_json()` now invoke `__pydantic_validator__.validate_python` directly instead of going through `BaseModel.model_validate`. Observable behaviour is identical; per-call cost drops by roughly 1.3–1.5× depending on shape.
+
 ## [0.3.0] - 2026-04-22
 
 ### Changed
