@@ -14,6 +14,12 @@ uv add pydantic-projections
 pip install pydantic-projections
 ```
 
+For the optional FastAPI integration (`ProjectedResponse`), install the extra:
+
+```bash
+pip install pydantic-projections[fastapi]
+```
+
 ## Why
 
 You have a fat `BaseModel` for internal use, and you want to expose only a subset of its fields over an API, to a logging system, or to a downstream consumer. Pydantic already lets you do this with `model_dump(include=...)`, but that's stringly-typed and type-unsafe. A `Protocol` describes the shape you want; `pydantic-projections` turns that Protocol into a real BaseModel at runtime, cached per `(protocol, frozen, config)` triple.
@@ -111,9 +117,11 @@ project(user, UserDisplay).display_name  # -> "User: Alice"
 
 `project(instance, Proto)` is typed to return `Proto`, so `summary.name` resolves to `str` in mypy/pyright without a cast. At runtime the object is a `BaseModel` subclass that structurally satisfies the Protocol.
 
-### FastAPI `response_model`
+### FastAPI integration
 
-`projection(Proto)` returns a real BaseModel class, so it drops into FastAPI's `response_model` unchanged — the endpoint's output is pruned to the Protocol's fields and the OpenAPI schema matches:
+Two patterns, in order of speed:
+
+**Drop-in `response_model`.** `projection(Proto)` returns a real BaseModel class, so it plugs into FastAPI's `response_model` unchanged — the endpoint's output is pruned to the Protocol's fields and the OpenAPI schema matches:
 
 ```python
 from fastapi import FastAPI
@@ -126,6 +134,46 @@ app = FastAPI()
 def get_user(id: int) -> User:
     return db.get_user(id)  # returns the fat User; caller sees only UserSummary's fields
 ```
+
+This path still goes through FastAPI's full `serialize_response` + `jsonable_encoder` + `json.dumps` chain every request. Fine for most endpoints.
+
+**High-throughput: `ProjectedResponse`.** For hot paths, return a `ProjectedResponse` instead. It bypasses `serialize_response`/`jsonable_encoder` entirely and emits JSON bytes via two Rust-backed calls (validate, then serialize) on the projection class's `__pydantic_validator__` and `__pydantic_serializer__`, with no `jsonable_encoder` / `json.dumps` step in between:
+
+```python
+from fastapi import FastAPI
+from fastapi.responses import Response
+from pydantic_projections import ProjectedResponse
+
+app = FastAPI()
+
+
+@app.get("/users/{id}")
+def get_user(id: int) -> Response:
+    return ProjectedResponse(db.get_user(id), UserSummary)
+```
+
+Don't set `response_model` when using `ProjectedResponse` — FastAPI would run validation + serialization again and defeat the purpose. `ProjectedResponse(...)` validates at construction time, so a source that doesn't satisfy the Protocol raises `ProjectionError` from the handler (catchable via a FastAPI exception handler). Install with `pip install pydantic-projections[fastapi]`.
+
+Extra serializer kwargs (`by_alias=True`, `exclude_none=True`, `indent=2`, …) are forwarded to the projection's `__pydantic_serializer__.to_json`, so a project using a camelCase `alias_generator` in its `projection()` config can do `ProjectedResponse(user, UserSummary, by_alias=True)`.
+
+**OpenAPI schema.** Because `response_model` is unset, FastAPI cannot derive a 200 response schema for the endpoint — the OpenAPI spec will show an empty schema. Use `openapi_response(Protocol)` to advertise the projection's schema via `responses=`:
+
+```python
+from fastapi import FastAPI
+from fastapi.responses import Response
+from pydantic_projections import ProjectedResponse, openapi_response
+
+app = FastAPI()
+
+
+@app.get("/users/{id}", responses={200: openapi_response(UserSummary)})
+def get_user(id: int) -> Response:
+    return ProjectedResponse(db.get_user(id), UserSummary)
+```
+
+This advertises the projection's schema in the spec (`$ref: '#/components/schemas/UserSummaryProjection'`) without re-running serialization on the response path. `openapi_response()` returns a `{"model": ...}` entry, so it composes naturally with other status codes: `responses={200: openapi_response(UserSummary), 404: {"model": NotFound}}`.
+
+See `benches/test_render_bench.py` for the comparison; in our measurements `ProjectedResponse` is roughly 2–4× faster than the `response_model=projection(...)` path on raw ser/deser work, depending on FastAPI version and response shape. Note that FastAPI's `TestClient` is a poor way to measure this — its per-call transport setup dominates — use `uvicorn` + an external HTTP benchmark tool (`wrk`, `hey`, `oha`) for end-to-end numbers.
 
 ### Config pass-through and `frozen`
 
@@ -165,11 +213,14 @@ except ProjectionError as e:
 ### JSON shortcut
 
 ```python
-from pydantic_projections import project_json
+from pydantic_projections import project_json, project_json_bytes
 
 project_json(user, UserSummary)                 # str
-project_json(user, UserSummary, indent=2)       # forwards **kwargs to model_dump_json
+project_json(user, UserSummary, indent=2)       # forwards **kwargs to the projection's serializer
+project_json_bytes(user, UserSummary)           # bytes — skip the str intermediate
 ```
+
+Prefer `project_json_bytes` when writing to a socket or HTTP response: it calls the projection class's Rust-backed serializer directly and avoids the bytes→str→bytes round-trip.
 
 ### Cache management
 
@@ -188,6 +239,12 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 - **Narrowing** is not: if the source value is `None` for a Protocol field typed `str`, validation raises.
 - **Classes are cached** per `(protocol, config, frozen)` via `functools.cache`.
 
+## Performance
+
+- `project()` and `project_json()` invoke the projection class's `__pydantic_validator__` directly, skipping `BaseModel.model_validate`'s Python wrapper. Observable behaviour is unchanged; per-call cost is ~1.3–1.5× lower.
+- `project_json_bytes()` emits bytes via `__pydantic_serializer__.to_json` directly, avoiding `model_dump_json().encode()`'s bytes→str→bytes round-trip.
+- `ProjectedResponse` (FastAPI) skips `serialize_response` + `jsonable_encoder` + `json.dumps` and goes straight from source → validated projection → JSON bytes via two Rust-backed calls (`validate_python`, then `to_json`) with no `jsonable_encoder` / `json.dumps` step in between. In our benches (`benches/test_render_bench.py`) the fast path runs roughly 2–4× faster than the `response_model=projection(...)` baseline, depending on FastAPI version and response shape. Run locally with `uv run pytest benches/ --benchmark-only` — numbers vary by machine, so compare relative columns.
+
 ## Limitations
 
 - Cyclic Protocols (a Protocol that references itself transitively) are not supported and will recurse.
@@ -200,9 +257,10 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 uv sync
 uv run pytest
 uv run python scripts/validate_tests.py
-uv run ruff check src/ tests/ scripts/
+uv run ruff check src/ tests/ benches/ scripts/
 uv run mypy src/
 uv run coverage run -m pytest && uv run coverage report
+uv run pytest benches/ --benchmark-only    # perf micro-benches
 ```
 
 Tests use pytest-describe (`describe_`/`when_`/`with_`/`it_`). See `CLAUDE.md` for conventions.

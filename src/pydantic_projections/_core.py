@@ -75,8 +75,29 @@ def project_json(
     protocol: type[P],
     **dump_kwargs: Any,
 ) -> str:
-    """Shortcut for ``project(instance, protocol).model_dump_json(**kwargs)``."""
-    return _project_one(instance, protocol).model_dump_json(**dump_kwargs)
+    """Shortcut for ``project(instance, protocol).model_dump_json(**kwargs)``.
+
+    Returns a ``str``. Prefer :func:`project_json_bytes` when writing the result
+    to a socket or HTTP response — it skips the Rust-side ``bytes -> str`` step
+    pydantic performs inside ``model_dump_json``.
+    """
+    return project_json_bytes(instance, protocol, **dump_kwargs).decode()
+
+
+def project_json_bytes(
+    instance: Any,
+    protocol: type[P],
+    **dump_kwargs: Any,
+) -> bytes:
+    """Project ``instance`` through ``protocol`` and emit JSON bytes in one pass.
+
+    Uses the projection class's ``__pydantic_serializer__`` (Rust) directly,
+    avoiding the ``str`` intermediate produced by :meth:`BaseModel.model_dump_json`.
+    Suitable for wire emission (HTTP responses, socket writes).
+    """
+    projected = _project_one(instance, protocol)
+    model_cls = type(projected)
+    return model_cls.__pydantic_serializer__.to_json(projected, **dump_kwargs)
 
 
 def cache_clear() -> None:
@@ -90,7 +111,12 @@ def cache_clear() -> None:
 def _project_one(instance: Any, protocol: type[P]) -> BaseModel:
     model_cls = projection(protocol)
     try:
-        return model_cls.model_validate(instance)
+        return cast(
+            "BaseModel",
+            model_cls.__pydantic_validator__.validate_python(
+                instance, from_attributes=True
+            ),
+        )
     except ValidationError as exc:
         raise ProjectionError(
             f"{type(instance).__name__} does not satisfy "

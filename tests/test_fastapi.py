@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+pytest.importorskip("fastapi")
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from models import (
+    Address,
+    User,
+    UserSummary,
+    UserWithAddress,
+    UserWithAddressSummary,
+)
+
+from pydantic_projections import ProjectedResponse, ProjectionError, openapi_response
+
+
+def describe_ProjectedResponse():
+    def when_endpoint_returns_a_flat_projection():
+        def it_emits_only_protocol_fields_as_json():
+            app = FastAPI()
+
+            @app.get("/u")
+            def get_user() -> object:
+                return ProjectedResponse(
+                    User(id=1, name="Alice", email="a@b.c", password_hash="secret"),
+                    UserSummary,
+                )
+
+            client = TestClient(app)
+            r = client.get("/u")
+
+            assert r.status_code == 200
+            assert r.headers["content-type"] == "application/json"
+            assert r.json() == {"id": 1, "name": "Alice"}
+
+    def when_endpoint_returns_a_nested_projection():
+        def it_prunes_fields_at_every_level():
+            addr = Address(street="1 Main", zip_code="00000", country="FR")
+            source = UserWithAddress(id=1, name="Alice", address=addr)
+            app = FastAPI()
+
+            @app.get("/u")
+            def get_user() -> object:
+                return ProjectedResponse(source, UserWithAddressSummary)
+
+            client = TestClient(app)
+            r = client.get("/u")
+
+            assert r.status_code == 200
+            body = r.json()
+            assert body == {
+                "id": 1,
+                "name": "Alice",
+                "address": {"street": "1 Main", "zip_code": "00000"},
+            }
+
+    def when_given_a_status_code_and_headers():
+        def it_forwards_them_to_the_response():
+            user = User(id=1, name="Alice", email="a@b.c", password_hash="s")
+            app = FastAPI()
+
+            @app.get("/u")
+            def get_user() -> object:
+                return ProjectedResponse(
+                    user,
+                    UserSummary,
+                    status_code=201,
+                    headers={"x-custom": "yes"},
+                )
+
+            client = TestClient(app)
+            r = client.get("/u")
+
+            assert r.status_code == 201
+            assert r.headers["x-custom"] == "yes"
+
+    def when_source_does_not_satisfy_the_protocol():
+        def it_raises_ProjectionError_at_construction():
+            class Bare:
+                id = 1  # missing 'name'
+
+            with pytest.raises(ProjectionError) as info:
+                ProjectedResponse(Bare(), UserSummary)
+
+            assert info.value.protocol is UserSummary
+            assert info.value.source_type is Bare
+
+    def when_rendered():
+        def it_emits_bytes_matching_project_json_bytes():
+            from pydantic_projections import project_json_bytes
+
+            addr = Address(street="1 Main", zip_code="00000", country="FR")
+            source = UserWithAddress(id=1, name="Alice", address=addr)
+            resp = ProjectedResponse(source, UserWithAddressSummary)
+
+            assert json.loads(resp.body) == json.loads(
+                project_json_bytes(source, UserWithAddressSummary)
+            )
+
+    def when_dump_kwargs_are_passed():
+        def it_forwards_them_to_the_serializer():
+            user = User(id=1, name="Alice", email="a@b.c", password_hash="s")
+
+            resp = ProjectedResponse(user, UserSummary, indent=2)
+
+            assert b"\n" in resp.body
+
+
+def describe_lazy_import():
+    def when_imported_from_package_root():
+        def it_resolves_ProjectedResponse_via_module_getattr():
+            import pydantic_projections
+
+            assert pydantic_projections.ProjectedResponse is ProjectedResponse
+
+        def it_resolves_openapi_response_via_module_getattr():
+            import pydantic_projections
+
+            assert pydantic_projections.openapi_response is openapi_response
+
+    def when_accessing_an_unknown_attribute():
+        def it_raises_AttributeError():
+            import pydantic_projections
+
+            with pytest.raises(AttributeError):
+                pydantic_projections.not_a_real_symbol  # noqa: B018
+
+
+def describe_openapi_response():
+    def when_called():
+        def it_returns_the_FastAPI_responses_entry_for_its_projection():
+            from pydantic_projections import projection
+
+            entry = openapi_response(UserSummary)
+
+            assert entry == {"model": projection(UserSummary)}
+
+    def when_used_on_a_route():
+        def it_advertises_the_projection_schema_in_the_openapi_spec():
+            app = FastAPI()
+
+            @app.get("/u", responses={200: openapi_response(UserSummary)})
+            def get_user() -> object:
+                return ProjectedResponse(
+                    User(id=1, name="Alice", email="a@b.c", password_hash="s"),
+                    UserSummary,
+                )
+
+            client = TestClient(app)
+            spec = client.get("/openapi.json").json()
+
+            ref = spec["paths"]["/u"]["get"]["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            assert ref.endswith("/UserSummaryProjection")
+
+        def with_other_status_codes_in_the_responses_dict():
+            def it_advertises_each_models_schema_at_its_status_code():
+                from pydantic import BaseModel
+
+                class NotFound(BaseModel):
+                    detail: str
+
+                app = FastAPI()
+
+                @app.get(
+                    "/u",
+                    responses={
+                        200: openapi_response(UserSummary),
+                        404: {"model": NotFound},
+                    },
+                )
+                def get_user() -> object:
+                    return ProjectedResponse(
+                        User(id=1, name="Alice", email="a@b.c", password_hash="s"),
+                        UserSummary,
+                    )
+
+                client = TestClient(app)
+                spec = client.get("/openapi.json").json()
+                responses = spec["paths"]["/u"]["get"]["responses"]
+
+                ok_ref = responses["200"]["content"]["application/json"]["schema"][
+                    "$ref"
+                ]
+                nf_ref = responses["404"]["content"]["application/json"]["schema"][
+                    "$ref"
+                ]
+                assert ok_ref.endswith("/UserSummaryProjection")
+                assert nf_ref.endswith("/NotFound")

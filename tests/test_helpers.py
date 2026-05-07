@@ -5,7 +5,12 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from pydantic_projections import cache_clear, project_json, projection
+from pydantic_projections import (
+    cache_clear,
+    project_json,
+    project_json_bytes,
+    projection,
+)
 
 
 class _Source(BaseModel):
@@ -38,6 +43,17 @@ def describe_project_json():
             raw = project_json(source, _Summary, indent=2)
 
             assert "\n" in raw
+
+
+def describe_project_json_bytes():
+    def when_called_on_a_valid_instance():
+        def it_returns_bytes_matching_project_json():
+            source = _Source(id=1, name="Alice")
+
+            raw = project_json_bytes(source, _Summary)
+
+            assert isinstance(raw, bytes)
+            assert raw == project_json(source, _Summary).encode()
 
 
 def describe_cache_clear():
