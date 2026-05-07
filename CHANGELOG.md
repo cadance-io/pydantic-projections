@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-07
+
 ### Added
 - `ProjectedResponse` — FastAPI response class that serializes a source instance through a Protocol straight to JSON bytes, bypassing FastAPI's `serialize_response` + `jsonable_encoder` + `json.dumps` chain. Benchmarked ~2–4× faster than the `response_model=projection(...)` baseline on raw ser/deser work (varies by FastAPI version and response shape). Accepts `**dump_kwargs` (e.g. `by_alias=True`, `exclude_none=True`, `indent=2`) forwarded to the projection's serializer. Raises `ProjectionError` at construction time if the source does not satisfy the Protocol. Import from `pydantic_projections` (lazy); requires the `fastapi` optional extra.
 - `openapi_response(protocol)` — returns the FastAPI `responses=` entry for a projection so the OpenAPI spec advertises the projection's schema without manual `{"model": ...}` plumbing. Pairs with `ProjectedResponse`. Composes for multi-status routes. Lazy fastapi import.
