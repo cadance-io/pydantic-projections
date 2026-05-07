@@ -137,7 +137,7 @@ def get_user(id: int) -> User:
 
 This path still goes through FastAPI's full `serialize_response` + `jsonable_encoder` + `json.dumps` chain every request. Fine for most endpoints.
 
-**High-throughput: `ProjectedResponse`.** For hot paths, return a `ProjectedResponse` instead. It bypasses `serialize_response`/`jsonable_encoder` entirely and emits JSON bytes in a single Rust-side call via the projection class's `__pydantic_validator__` and `__pydantic_serializer__`:
+**High-throughput: `ProjectedResponse`.** For hot paths, return a `ProjectedResponse` instead. It bypasses `serialize_response`/`jsonable_encoder` entirely and emits JSON bytes via two Rust-backed calls (validate, then serialize) on the projection class's `__pydantic_validator__` and `__pydantic_serializer__`, with no `jsonable_encoder` / `json.dumps` step in between:
 
 ```python
 from fastapi import FastAPI
@@ -243,7 +243,7 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 
 - `project()` and `project_json()` invoke the projection class's `__pydantic_validator__` directly, skipping `BaseModel.model_validate`'s Python wrapper. Observable behaviour is unchanged; per-call cost is ~1.3–1.5× lower.
 - `project_json_bytes()` emits bytes via `__pydantic_serializer__.to_json` directly, avoiding `model_dump_json().encode()`'s bytes→str→bytes round-trip.
-- `ProjectedResponse` (FastAPI) skips `serialize_response` + `jsonable_encoder` + `json.dumps` and goes straight from source → validated projection → JSON bytes in a single Rust-side pass. In our benches (`benches/test_render_bench.py`) the fast path runs roughly 2–4× faster than the `response_model=projection(...)` baseline, depending on FastAPI version and response shape. Run locally with `uv run pytest benches/ --benchmark-only` — numbers vary by machine, so compare relative columns.
+- `ProjectedResponse` (FastAPI) skips `serialize_response` + `jsonable_encoder` + `json.dumps` and goes straight from source → validated projection → JSON bytes via two Rust-backed calls (`validate_python`, then `to_json`) with no `jsonable_encoder` / `json.dumps` step in between. In our benches (`benches/test_render_bench.py`) the fast path runs roughly 2–4× faster than the `response_model=projection(...)` baseline, depending on FastAPI version and response shape. Run locally with `uv run pytest benches/ --benchmark-only` — numbers vary by machine, so compare relative columns.
 
 ## Limitations
 

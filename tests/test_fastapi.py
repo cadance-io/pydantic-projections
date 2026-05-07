@@ -80,7 +80,7 @@ def describe_ProjectedResponse():
             assert r.headers["x-custom"] == "yes"
 
     def when_source_does_not_satisfy_the_protocol():
-        def it_raises_ProjectionError_at_render_time():
+        def it_raises_ProjectionError_at_construction():
             class Bare:
                 id = 1  # missing 'name'
 
@@ -89,6 +89,26 @@ def describe_ProjectedResponse():
 
             assert info.value.protocol is UserSummary
             assert info.value.source_type is Bare
+
+    def when_rendered():
+        def it_emits_bytes_matching_project_json_bytes():
+            from pydantic_projections import project_json_bytes
+
+            addr = Address(street="1 Main", zip_code="00000", country="FR")
+            source = UserWithAddress(id=1, name="Alice", address=addr)
+            resp = ProjectedResponse(source, UserWithAddressSummary)
+
+            assert json.loads(resp.body) == json.loads(
+                project_json_bytes(source, UserWithAddressSummary)
+            )
+
+    def when_dump_kwargs_are_passed():
+        def it_forwards_them_to_the_serializer():
+            user = User(id=1, name="Alice", email="a@b.c", password_hash="s")
+
+            resp = ProjectedResponse(user, UserSummary, indent=2)
+
+            assert b"\n" in resp.body
 
 
 def describe_lazy_import():
@@ -109,30 +129,6 @@ def describe_lazy_import():
 
             with pytest.raises(AttributeError):
                 pydantic_projections.not_a_real_symbol  # noqa: B018
-
-
-def describe_rendered_bytes():
-    def when_a_projection_has_nested_fields():
-        def it_matches_project_json_bytes_for_equivalent_source():
-            from pydantic_projections import project_json_bytes
-
-            addr = Address(street="1 Main", zip_code="00000", country="FR")
-            source = UserWithAddress(id=1, name="Alice", address=addr)
-            resp = ProjectedResponse(source, UserWithAddressSummary)
-
-            assert json.loads(resp.body) == json.loads(
-                project_json_bytes(source, UserWithAddressSummary)
-            )
-
-
-def describe_dump_kwargs_passthrough():
-    def when_indent_is_passed():
-        def it_forwards_to_the_serializer():
-            user = User(id=1, name="Alice", email="a@b.c", password_hash="s")
-
-            resp = ProjectedResponse(user, UserSummary, indent=2)
-
-            assert b"\n" in resp.body
 
 
 def describe_openapi_response():

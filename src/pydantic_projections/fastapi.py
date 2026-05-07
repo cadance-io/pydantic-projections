@@ -3,7 +3,8 @@
 :class:`ProjectedResponse` bypasses FastAPI's ``serialize_response`` +
 ``jsonable_encoder`` + ``json.dumps`` chain by calling the projection class's
 Rust-backed ``__pydantic_validator__`` and ``__pydantic_serializer__`` directly,
-producing JSON bytes in a single pass.
+producing JSON bytes via two Rust-backed calls (validate, then serialize) with
+no ``jsonable_encoder`` / ``json.dumps`` step in between.
 
 Import requires ``fastapi``; install with ``pip install pydantic-projections[fastapi]``.
 """
