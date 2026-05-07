@@ -79,9 +79,7 @@ class ProjectedResponse(Response):
         )
 
     def render(self, content: Any) -> bytes:
-        return project_json_bytes(
-            self._instance, self._protocol, **self._dump_kwargs
-        )
+        return project_json_bytes(self._instance, self._protocol, **self._dump_kwargs)
 
 
 def openapi_response(protocol: type[P]) -> dict[str, Any]:
