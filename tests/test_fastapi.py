@@ -16,7 +16,7 @@ from models import (
     UserWithAddressSummary,
 )
 
-from pydantic_projections import ProjectedResponse, ProjectionError
+from pydantic_projections import ProjectedResponse, ProjectionError, openapi_response
 
 
 def describe_ProjectedResponse():
@@ -93,10 +93,15 @@ def describe_ProjectedResponse():
 
 def describe_lazy_import():
     def when_imported_from_package_root():
-        def it_resolves_via_module_getattr():
+        def it_resolves_ProjectedResponse_via_module_getattr():
             import pydantic_projections
 
             assert pydantic_projections.ProjectedResponse is ProjectedResponse
+
+        def it_resolves_openapi_response_via_module_getattr():
+            import pydantic_projections
+
+            assert pydantic_projections.openapi_response is openapi_response
 
     def when_accessing_an_unknown_attribute():
         def it_raises_AttributeError():
@@ -118,3 +123,77 @@ def describe_rendered_bytes():
             assert json.loads(resp.body) == json.loads(
                 project_json_bytes(source, UserWithAddressSummary)
             )
+
+
+def describe_dump_kwargs_passthrough():
+    def when_indent_is_passed():
+        def it_forwards_to_the_serializer():
+            user = User(id=1, name="Alice", email="a@b.c", password_hash="s")
+
+            resp = ProjectedResponse(user, UserSummary, indent=2)
+
+            assert b"\n" in resp.body
+
+
+def describe_openapi_response():
+    def when_called():
+        def it_returns_the_FastAPI_responses_entry_for_its_projection():
+            from pydantic_projections import projection
+
+            entry = openapi_response(UserSummary)
+
+            assert entry == {"model": projection(UserSummary)}
+
+    def when_used_on_a_route():
+        def it_advertises_the_projection_schema_in_the_openapi_spec():
+            app = FastAPI()
+
+            @app.get("/u", responses={200: openapi_response(UserSummary)})
+            def get_user() -> object:
+                return ProjectedResponse(
+                    User(id=1, name="Alice", email="a@b.c", password_hash="s"),
+                    UserSummary,
+                )
+
+            client = TestClient(app)
+            spec = client.get("/openapi.json").json()
+
+            ref = spec["paths"]["/u"]["get"]["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            assert ref.endswith("/UserSummaryProjection")
+
+        def with_other_status_codes_in_the_responses_dict():
+            def it_advertises_each_models_schema_at_its_status_code():
+                from pydantic import BaseModel
+
+                class NotFound(BaseModel):
+                    detail: str
+
+                app = FastAPI()
+
+                @app.get(
+                    "/u",
+                    responses={
+                        200: openapi_response(UserSummary),
+                        404: {"model": NotFound},
+                    },
+                )
+                def get_user() -> object:
+                    return ProjectedResponse(
+                        User(id=1, name="Alice", email="a@b.c", password_hash="s"),
+                        UserSummary,
+                    )
+
+                client = TestClient(app)
+                spec = client.get("/openapi.json").json()
+                responses = spec["paths"]["/u"]["get"]["responses"]
+
+                ok_ref = responses["200"]["content"]["application/json"]["schema"][
+                    "$ref"
+                ]
+                nf_ref = responses["404"]["content"]["application/json"]["schema"][
+                    "$ref"
+                ]
+                assert ok_ref.endswith("/UserSummaryProjection")
+                assert nf_ref.endswith("/NotFound")
