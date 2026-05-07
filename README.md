@@ -154,6 +154,23 @@ def get_user(id: int) -> Response:
 
 Don't set `response_model` when using `ProjectedResponse` — FastAPI would run validation + serialization again and defeat the purpose. `ProjectedResponse(...)` validates at construction time, so a source that doesn't satisfy the Protocol raises `ProjectionError` from the handler (catchable via a FastAPI exception handler). Install with `pip install pydantic-projections[fastapi]`.
 
+**OpenAPI schema.** Because `response_model` is unset, FastAPI cannot derive a 200 response schema for the endpoint — the OpenAPI spec will show an empty schema. To keep the schema, declare it via `responses=` on the route:
+
+```python
+from fastapi import FastAPI
+from fastapi.responses import Response
+from pydantic_projections import ProjectedResponse, projection
+
+app = FastAPI()
+
+
+@app.get("/users/{id}", responses={200: {"model": projection(UserSummary)}})
+def get_user(id: int) -> Response:
+    return ProjectedResponse(db.get_user(id), UserSummary)
+```
+
+This advertises the projection's schema in the spec (`$ref: '#/components/schemas/UserSummaryProjection'`) without re-running serialization on the response path.
+
 See `benches/test_render_bench.py` for the comparison; in our measurements `ProjectedResponse` is roughly 2–4× faster than the `response_model=projection(...)` path on raw ser/deser work, depending on FastAPI version and response shape. Note that FastAPI's `TestClient` is a poor way to measure this — its per-call transport setup dominates — use `uvicorn` + an external HTTP benchmark tool (`wrk`, `hey`, `oha`) for end-to-end numbers.
 
 ### Config pass-through and `frozen`

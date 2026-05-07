@@ -24,10 +24,10 @@ from ._core import (
 )
 
 if TYPE_CHECKING:
-    from .fastapi import ProjectedResponse
+    # Re-exported lazily via __getattr__ to avoid importing fastapi when unused.
+    from .fastapi import ProjectedResponse  # noqa: F401
 
 __all__ = [
-    "ProjectedResponse",
     "ProjectionError",
     "cache_clear",
     "project",

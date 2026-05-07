@@ -110,7 +110,6 @@ allow_redefinition = true
 [tool.coverage.run]
 source = ["pydantic_projections"]
 branch = true
-omit = ["benches/*"]
 
 [tool.coverage.report]
 fail_under = 92

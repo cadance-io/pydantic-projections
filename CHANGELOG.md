@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `project()` and `project_json()` now invoke `__pydantic_validator__.validate_python` directly instead of going through `BaseModel.model_validate`. Observable behaviour is identical; per-call cost drops by roughly 1.3–1.5× depending on shape.
+- `project_json()` now emits its result through `__pydantic_serializer__.to_json` (decoded to `str`) rather than `BaseModel.model_dump_json`. Accepted `**kwargs` are the same except for `mode=`, which the Rust serializer does not support and which is irrelevant for JSON output.
 
 ## [0.3.0] - 2026-04-22
 

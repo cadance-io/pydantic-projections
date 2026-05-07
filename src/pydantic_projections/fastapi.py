@@ -42,8 +42,9 @@ class ProjectedResponse(Response):
     the purpose. Declaring the return type as ``Response`` or leaving it
     unannotated is fine.
 
-    Raises :class:`ProjectionError` at render time if the source does not
-    satisfy the Protocol.
+    Raises :class:`ProjectionError` at construction time (Starlette's
+    ``Response.__init__`` invokes ``render``) if the source does not satisfy
+    the Protocol.
     """
 
     media_type = "application/json"
