@@ -56,3 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extras ignored on deserialisation; `from_attributes=True` for dict / JSON / object inputs.
 - Class caching per Protocol via `functools.cache`.
 - pytest-describe test suite with AST-based structure validator.
+
+[Unreleased]: https://github.com/cadance-io/pydantic-projections/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/cadance-io/pydantic-projections/releases/tag/v0.1.0
