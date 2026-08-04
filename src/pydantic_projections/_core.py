@@ -176,9 +176,13 @@ def _build(
 
 
 def _collect_field_hints(protocol: type) -> dict[str, Any]:
-    """Merge annotated attributes and ``@property`` declarations into one dict."""
+    """Merge annotated attributes and ``@property`` declarations into one dict.
+
+    ``include_extras=True`` keeps ``Annotated[T, Field(...)]`` metadata intact, so
+    constraints and schema hints declared on the Protocol reach the built model.
+    """
     try:
-        hints = dict(get_type_hints(protocol))
+        hints = dict(get_type_hints(protocol, include_extras=True))
     except Exception as exc:
         raise TypeError(
             f"Could not resolve annotations on {protocol!r}: {exc}"
@@ -193,7 +197,7 @@ def _collect_field_hints(protocol: type) -> dict[str, Any]:
             if not (isinstance(value, property) and value.fget is not None):
                 continue
             try:
-                prop_hints = get_type_hints(value.fget)
+                prop_hints = get_type_hints(value.fget, include_extras=True)
             except Exception:  # noqa: S112
                 continue
             if "return" in prop_hints:
