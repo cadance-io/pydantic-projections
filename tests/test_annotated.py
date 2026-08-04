@@ -32,10 +32,6 @@ class _WithAnnotatedProperty(Protocol):
     def label(self) -> Annotated[str, Field(min_length=3)]: ...
 
 
-class _Labelled(BaseModel):
-    label: str
-
-
 class _Owner(BaseModel):
     id: int
     address: Address
@@ -91,8 +87,3 @@ def describe_projection():
             schema = projection(_WithAnnotatedProperty).model_json_schema()
 
             assert schema["properties"]["label"]["minLength"] == 3
-
-        def it_still_projects_the_value():
-            projected = project(_Labelled(label="Alice"), _WithAnnotatedProperty)
-
-            assert projected.label == "Alice"

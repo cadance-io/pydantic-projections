@@ -7,7 +7,7 @@ Public API:
       its field list.
     - :func:`project_json` — shortcut for ``project(...).model_dump_json(...)``.
     - :func:`project_json_bytes` — bytes-returning equivalent; skips the ``str`` hop.
-    - :func:`cache_clear` — clear the projection class cache.
+    - :func:`cache_clear` — clear the projection class and ``pick`` Protocol caches.
     - :class:`ProjectionError` — raised when an instance does not satisfy the Protocol.
     - :class:`ProjectedResponse` — FastAPI response class that serializes a source
       instance through a Protocol straight to JSON bytes. Available only if
@@ -20,13 +20,13 @@ from typing import TYPE_CHECKING, Any
 
 from ._core import (
     ProjectionError,
-    cache_clear,
+    _build,
     project,
     project_json,
     project_json_bytes,
     projection,
 )
-from ._pick import pick
+from ._pick import _protocol_for, pick
 
 if TYPE_CHECKING:
     # Re-exported lazily via __getattr__ to avoid importing fastapi when unused.
@@ -41,6 +41,15 @@ __all__ = [
     "project_json_bytes",
     "projection",
 ]
+
+
+def cache_clear() -> None:
+    """Clear the projection class and ``pick`` Protocol caches.
+
+    Useful in test fixtures that redefine Protocols or in hot-reload workflows.
+    """
+    _build.cache_clear()
+    _protocol_for.cache_clear()
 
 
 _LAZY_FASTAPI_EXPORTS = frozenset({"ProjectedResponse", "openapi_response"})

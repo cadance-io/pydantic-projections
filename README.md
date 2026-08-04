@@ -60,6 +60,30 @@ SummaryModel.model_json_schema()
 # -> standard pydantic JSON schema
 ```
 
+### Field metadata
+
+A Protocol member can carry pydantic metadata through `Annotated[T, Field(...)]`. Constraints are enforced and schema hints reach the JSON schema:
+
+```python
+from typing import Annotated, Protocol
+
+from pydantic import Field
+
+
+class UserSummary(Protocol):
+    id: int
+    name: Annotated[str, Field(min_length=3, examples=["Alice"])]
+
+
+projection(UserSummary).model_json_schema()["properties"]["name"]
+# -> {'examples': ['Alice'], 'minLength': 3, 'title': 'Name', 'type': 'string'}
+
+project(User(id=1, name="Al", email="a@b.c", password_hash="x"), UserSummary)
+# -> raises ProjectionError: name is shorter than min_length
+```
+
+`@property` members can be annotated the same way, and a Protocol nested inside the annotation (`Annotated[AddressSummary, Field(description=...)]`) is still substituted. A `default=` in the metadata does **not** make the field optional — projected fields stay required.
+
 ### Nested protocols and containers
 
 Protocols can reference other Protocols. The projection is built recursively, so `list[P]`, `dict[str, P]`, `tuple[P, ...]`, `P | None`, `Union[P, ...]`, and plain `P` all work:
@@ -112,6 +136,90 @@ class UserDisplay(Protocol):
 
 project(user, UserDisplay).display_name  # -> "User: Alice"
 ```
+
+### Deriving a projection from a model (`pick`)
+
+Hand-written response models drift. Thirteen FastAPI routes handing SQLModel `table=True` classes straight to `response_model` publish every raw DB column — `password_hash` today, whatever the next migration adds tomorrow. The usual fix is thirteen hand-written response models, each of which has to be kept in step with its table by hand. `pick(Model, *names)` replaces each one with a single line whose types are read from the source, so they cannot drift from it:
+
+```python
+from datetime import datetime
+
+from pydantic import BaseModel
+from pydantic_projections import pick, project
+
+
+class User(BaseModel):
+    id: int
+    email: str
+    created_at: datetime
+    password_hash: str
+
+
+UserView = pick(User, "id", "email", "created_at")
+
+user = User(
+    id=1,
+    email="alice@example.com",
+    created_at=datetime(2026, 1, 1),
+    password_hash="secret",
+)
+
+project(user, UserView).model_dump_json()
+# -> '{"id":1,"email":"alice@example.com","created_at":"2026-01-01T00:00:00"}'
+```
+
+`pick` returns an ordinary Protocol, so the rest of this README applies to it unchanged — `project()`, `projection(..., config=, frozen=)`, nesting it inside another Protocol, and both FastAPI patterns described [below](#fastapi-integration):
+
+```python
+@app.get("/users/{id}", response_model=projection(UserView))
+def get_user(id: int) -> User:
+    return db.get_user(id)
+
+
+@app.get("/fast/users/{id}", responses={200: openapi_response(UserView)})
+def get_user_fast(id: int) -> Response:
+    return ProjectedResponse(db.get_user(id), UserView)
+```
+
+Both return `{"id":1,"email":"alice@example.com","created_at":"2026-01-01T00:00:00"}`, and the second advertises `$ref: '#/components/schemas/UserViewProjection'` in the spec.
+
+`pick` is an allowlist: a column added to `User` later stays private until someone opts it in. There is deliberately no `omit()` counterpart — a denylist publishes every new column by default, which is the failure mode `pick` exists to remove.
+
+- Every picked field is required, whatever default the source declares.
+- Constraints (`min_length`, `gt`, …) and schema documentation (`title`, `description`, `examples`, `json_schema_extra`, `deprecated`) carry over. Pass `metadata=False` for bare annotations.
+- Aliases are dropped by default: a validation alias makes pydantic look the attribute up under a name the source instance does not have, which breaks `from_attributes`. Pass `aliases=True` to carry the source's *serialization* alias, so a dump with `by_alias=True` matches the source's wire format while validation still reads the attribute name.
+- `@computed_field` members are pickable; their return type is used.
+- `name=` overrides the generated Protocol's name (default `f"{Model.__name__}View"`, so `UserView` projects to `UserViewProjection`). Set it when two picks of the same model would otherwise collide in an OpenAPI schema.
+- Unknown names raise at `pick()` call time — import time in practice, not on the first request:
+
+```python
+pick(User, "id", "emial")
+# -> ValueError: User has no field 'emial'; available: created_at, email, id, password_hash
+```
+
+A source that isn't a `BaseModel` subclass raises `TypeError`. Results are cached, so equal calls return the same Protocol and therefore the same projection class; `cache_clear()` clears it.
+
+#### Narrowing a picked field
+
+The allowlist is one level deep: a picked field whose type is another `BaseModel` publishes that model whole. To narrow it — or to tighten an annotation the source declares as nullable — subclass the picked Protocol and restate only the fields you are changing:
+
+```python
+class Order(BaseModel):
+    id: int | None = None  # SQLModel-style: nullable until the row is flushed
+    total: float
+    address: Address       # a full model, published whole by a bare pick
+
+
+class OrderView(pick(Order, "id", "total", "address"), Protocol):
+    id: int                    # narrowed: no longer nullable
+    address: AddressSummary    # the Protocol from above, projected recursively
+
+
+project(order, OrderView).model_dump_json()
+# -> '{"id":7,"total":9.5,"address":{"street":"1 Main St","zip_code":"75001"}}'
+```
+
+The base class is picked, so the fields you don't restate still can't drift. And because this is a real `class` statement, `OrderView` is valid as a type — `owner: OrderView` type-checks, unlike the bare `pick(...)` result. Type checkers do flag the dynamic base class, so it needs a `# type: ignore[misc]`.
 
 ### Typing at the call site
 
@@ -250,6 +358,9 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 - Cyclic Protocols (a Protocol that references itself transitively) are not supported and will recurse.
 - Generic Protocols (`Protocol[T]`) with unresolved `TypeVar`s are not supported.
 - Config values passed via `config=` must be hashable for caching.
+- `pick()` synthesizes its Protocol at runtime, so type checkers see `Any`. `UserView = pick(...)` is a variable, not a class statement: using it as an annotation (`owner: UserView`) is a mypy error (`Variable "UserView" is not valid as a type`) even though it works at runtime. The field names are strings, so typos and renames are not caught statically either — `pick()` validates them eagerly at call time to compensate. [Subclassing the result](#narrowing-a-picked-field) gets you back a real class statement that is valid as a type, at the cost of one `# type: ignore[misc]` for the dynamic base class.
+- `pick()` cannot invent non-nullability. A SQLModel `table=True` class annotates its primary key `id: int | None`, so `pick(Model, "id")` yields `int | None` — required, but still nullable in the schema. `pick` fixes required-ness, not the annotation; [subclass the picked Protocol](#narrowing-a-picked-field) and restate that one field to narrow it.
+- `pick()`'s allowlist is one level deep. A picked field typed as another `BaseModel` publishes that model whole, including columns you would not have picked — [narrow it](#narrowing-a-picked-field) with a Protocol-typed override.
 
 ## Development
 
