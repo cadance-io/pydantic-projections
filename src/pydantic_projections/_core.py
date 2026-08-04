@@ -3,6 +3,7 @@ from __future__ import annotations
 import types
 from functools import cache
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generic,
     Protocol,
@@ -15,6 +16,9 @@ from typing import (
 )
 
 from pydantic import BaseModel, ConfigDict, ValidationError, create_model
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 P = TypeVar("P")
 
@@ -39,7 +43,7 @@ class ProjectionError(ValueError):
 
 
 def projection(
-    protocol: type[P],
+    protocol: Callable[..., P],
     *,
     config: ConfigDict | None = None,
     frozen: bool = True,
@@ -59,10 +63,10 @@ def projection(
     """
     if not isinstance(protocol, type):
         raise TypeError(f"projection() expects a Protocol class, got {protocol!r}")
-    return _build(cast("type", protocol), frozen, _freeze_config(config))
+    return _build(protocol, frozen, _freeze_config(config))
 
 
-def project(instance: Any, protocol: type[P]) -> P:
+def project(instance: Any, protocol: Callable[..., P]) -> P:
     """Project ``instance`` through ``protocol``, returning a typed projection model.
 
     Raises :class:`ProjectionError` if the instance does not satisfy the Protocol.
@@ -72,7 +76,7 @@ def project(instance: Any, protocol: type[P]) -> P:
 
 def project_json(
     instance: Any,
-    protocol: type[P],
+    protocol: Callable[..., P],
     **dump_kwargs: Any,
 ) -> str:
     """Shortcut for ``project(instance, protocol).model_dump_json(**kwargs)``.
@@ -86,7 +90,7 @@ def project_json(
 
 def project_json_bytes(
     instance: Any,
-    protocol: type[P],
+    protocol: Callable[..., P],
     **dump_kwargs: Any,
 ) -> bytes:
     """Project ``instance`` through ``protocol`` and emit JSON bytes in one pass.
@@ -100,7 +104,7 @@ def project_json_bytes(
     return model_cls.__pydantic_serializer__.to_json(projected, **dump_kwargs)
 
 
-def _project_one(instance: Any, protocol: type[P]) -> BaseModel:
+def _project_one(instance: Any, protocol: Callable[..., P]) -> BaseModel:
     model_cls = projection(protocol)
     try:
         return cast(
@@ -113,7 +117,9 @@ def _project_one(instance: Any, protocol: type[P]) -> BaseModel:
         raise ProjectionError(
             f"{type(instance).__name__} does not satisfy "
             f"{getattr(protocol, '__name__', protocol)!r}: {exc}",
-            protocol=protocol,
+            # projection() above rejects anything that is not a class, so the
+            # public `.protocol` attribute stays precisely typed.
+            protocol=cast("type", protocol),
             source_type=type(instance),
             validation_error=exc,
         ) from exc

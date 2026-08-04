@@ -30,11 +30,15 @@ from ._pick import _protocol_for, pick
 
 if TYPE_CHECKING:
     # Re-exported lazily via __getattr__ to avoid importing fastapi when unused.
-    from .fastapi import ProjectedResponse, openapi_response  # noqa: F401
+    from .fastapi import ProjectedResponse, openapi_response
 
 __all__ = [
+    # Lazily resolved through __getattr__; listed so type checkers treat them as
+    # explicit re-exports (mypy --strict rejects implicit ones).
+    "ProjectedResponse",
     "ProjectionError",
     "cache_clear",
+    "openapi_response",
     "pick",
     "project",
     "project_json",
