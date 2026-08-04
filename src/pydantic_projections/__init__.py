@@ -3,6 +3,8 @@
 Public API:
     - :func:`project` — one-shot: project an instance through a Protocol.
     - :func:`projection` — get (or build) the cached ``BaseModel`` class for a Protocol.
+    - :func:`pick` — derive a Protocol from an existing model, without restating
+      its field list.
     - :func:`project_json` — shortcut for ``project(...).model_dump_json(...)``.
     - :func:`project_json_bytes` — bytes-returning equivalent; skips the ``str`` hop.
     - :func:`cache_clear` — clear the projection class cache.
@@ -24,6 +26,7 @@ from ._core import (
     project_json_bytes,
     projection,
 )
+from ._pick import pick
 
 if TYPE_CHECKING:
     # Re-exported lazily via __getattr__ to avoid importing fastapi when unused.
@@ -32,6 +35,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ProjectionError",
     "cache_clear",
+    "pick",
     "project",
     "project_json",
     "project_json_bytes",

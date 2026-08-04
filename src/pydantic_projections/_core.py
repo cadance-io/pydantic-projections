@@ -16,6 +16,8 @@ from typing import (
 
 from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 
+from ._pick import _protocol_for
+
 P = TypeVar("P")
 
 _SKIP_IN_MRO: tuple[Any, ...] = (object, Generic, Protocol)
@@ -101,11 +103,12 @@ def project_json_bytes(
 
 
 def cache_clear() -> None:
-    """Clear the projection class cache.
+    """Clear the projection class and ``pick`` Protocol caches.
 
     Useful in test fixtures that redefine Protocols or in hot-reload workflows.
     """
     _build.cache_clear()
+    _protocol_for.cache_clear()
 
 
 def _project_one(instance: Any, protocol: type[P]) -> BaseModel:

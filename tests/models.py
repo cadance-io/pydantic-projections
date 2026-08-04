@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Protocol, Union
+from typing import Annotated, Protocol, Union
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 
 class User(BaseModel):
@@ -29,6 +29,21 @@ class UserMaybeName(Protocol):
 
 class UserDisplay(Protocol):
     display_name: str
+
+
+class Account(BaseModel):
+    """Source model for ``pick`` — one field per metadata case it must handle."""
+
+    id: int
+    email: Annotated[str, Field(min_length=3, description="login address")]
+    nickname: str = "anonymous"
+    legacy_id: int = Field(default=0, alias="legacyID")
+    password_hash: str
+
+    @computed_field
+    @property
+    def label(self) -> str:
+        return f"Account {self.id}"
 
 
 class Address(BaseModel):
