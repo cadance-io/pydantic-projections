@@ -12,12 +12,12 @@ def map_annotation(annotation: Any, leaf: Callable[[Any], Any]) -> Any:
 
     Containers, unions and ``Annotated`` metadata are rebuilt around whatever
     ``leaf`` returns, so ``list[P]``, ``dict[str, P]``, ``P | None`` and
-    ``Annotated[P, ...]`` are all traversed. An annotation ``leaf`` leaves alone
-    is returned unchanged — identity included — so a rewrite that changes
-    nothing allocates nothing.
+    ``Annotated[P, ...]`` are all traversed.
 
-    ``leaf`` returning its argument also makes this usable as a visitor: see
-    ``_pick._models_in``.
+    ``leaf`` declines a candidate by returning it unchanged; returning anything
+    else stops the walk for that branch, so a leaf never rewrites its own
+    output. An annotation nothing touched comes back identical, so a rewrite
+    that changes nothing allocates nothing.
     """
     replaced = leaf(annotation)
     if replaced is not annotation:
@@ -29,7 +29,9 @@ def map_annotation(annotation: Any, leaf: Callable[[Any], Any]) -> Any:
 
     args = get_args(annotation)
     new_args = tuple(map_annotation(arg, leaf) for arg in args)
-    if new_args == args:
+    # Identity, not equality: an equal-but-distinct rewrite is still a rewrite,
+    # and dropping it would silently discard what `leaf` asked for.
+    if all(new is old for new, old in zip(new_args, args, strict=True)):
         return annotation
 
     if origin is Union or origin is types.UnionType:

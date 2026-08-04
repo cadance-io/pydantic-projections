@@ -40,6 +40,10 @@ class ProjectionError(ValueError):
         self.validation_error = validation_error
 
 
+# `protocol` is a class, but annotating it `type[P]` makes mypy reject every
+# call that passes a Protocol (`type-abstract`), which is the documented usage.
+# `Callable[..., P]` keeps inference and admits one absurd call — a factory
+# returning P — which the isinstance check below rejects at runtime.
 def projection(
     protocol: Callable[..., P],
     *,

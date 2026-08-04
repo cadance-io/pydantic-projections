@@ -22,6 +22,10 @@ class _Street(BaseModel):
     city: _City
 
 
+class _Directory(BaseModel):
+    by_city: dict[_City, str]
+
+
 class _Building(BaseModel):
     id: int
     street: _Street
@@ -33,9 +37,15 @@ def _building() -> _Building:
     return _Building(id=1, street=_Street(label="Main", city=city), either=city)
 
 
-def _nested_city_schema(picked: type) -> dict:
+def _city_name_schema(picked: type) -> dict:
+    """Follow the $refs down to the nested city's `name`, as a consumer would."""
     schema = projection(picked).model_json_schema()
-    return schema["$defs"]["_BuildingViewStreetCityProjection"]["properties"]["name"]
+    definitions = schema["$defs"]
+
+    def descend(node: dict, field: str) -> dict:
+        return definitions[node["properties"][field]["$ref"].rsplit("/", 1)[-1]]
+
+    return descend(descend(schema, "street"), "city")["properties"]["name"]
 
 
 def _owner() -> UserWithAddress:
@@ -224,37 +234,44 @@ def describe_pick():
             def it_carries_the_nested_metadata():
                 picked = pick(_Building, "street.city.name")
 
-                assert _nested_city_schema(picked)["minLength"] == 2
+                assert _city_name_schema(picked)["minLength"] == 2
 
             def without_metadata():
                 def it_drops_it_at_every_level():
                     picked = pick(_Building, "street.city.name", metadata=False)
 
-                    assert "minLength" not in _nested_city_schema(picked)
+                    assert "minLength" not in _city_name_schema(picked)
 
         def when_the_head_is_not_a_model():
             def it_raises_at_call_time():
-                with pytest.raises(ValueError, match="email"):
+                with pytest.raises(ValueError, match="str contains no model"):
                     pick(Account, "email.length")
 
         def when_the_head_is_ambiguous():
             def it_raises_at_call_time():
-                with pytest.raises(ValueError, match="either"):
+                with pytest.raises(ValueError, match="ambiguous between"):
                     pick(_Building, "either.name")
 
         def when_the_head_is_a_computed_field():
             def it_raises_at_call_time():
-                with pytest.raises(ValueError, match="label"):
+                with pytest.raises(ValueError, match="computed field"):
                     pick(Account, "label.x")
+
+        def when_the_model_is_a_mapping_key():
+            def it_raises_at_call_time():
+                with pytest.raises(ValueError, match="mapping key"):
+                    pick(_Directory, "by_city.name")
 
         def when_a_nested_name_is_unknown():
             def it_names_the_path_in_the_error():
-                with pytest.raises(ValueError, match="address"):
+                with pytest.raises(
+                    ValueError, match=r"through UserWithAddress\.address:.*'stret'"
+                ):
                     pick(UserWithAddress, "address.stret")
 
         def when_the_whole_field_is_also_picked():
             def it_raises_at_call_time():
-                with pytest.raises(ValueError, match="address"):
+                with pytest.raises(ValueError, match="cannot pick both 'address'"):
                     pick(UserWithAddress, "address", "address.street")
 
         def when_the_path_is_malformed():

@@ -7,7 +7,7 @@ alongside ``src/``. Without it mypy never sees a call site, which is how
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, assert_type
 
 from pydantic import BaseModel
 
@@ -41,6 +41,13 @@ class Envelope(Protocol):
 
 
 UserView = pick(User, "id", "name")
+
+
+def projected_type(user: User) -> None:
+    # Not merely "no error": pins the inference itself, so collapsing the
+    # signature to Callable[..., Any] fails here instead of passing quietly.
+    assert_type(project(user, UserSummary), UserSummary)
+    assert_type(project(user, Envelope).owner, UserSummary)
 
 
 def projected_attribute(user: User) -> str:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import types
+from collections.abc import Mapping
 from functools import cache
-from typing import TYPE_CHECKING, Annotated, Any, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, get_args, get_origin
 
 from pydantic import BaseModel, Field
 from pydantic_core import PydanticUndefined
@@ -65,8 +66,10 @@ def pick(
     never carried: they would make pydantic look the attribute up under a name
     the source instance does not have, leaving the projection unusable.
 
-    ``name`` overrides the generated Protocol's name — worth setting when two
-    picks of the same model would otherwise collide in an OpenAPI schema.
+    ``name`` overrides the generated Protocol's name, and prefixes every nested
+    name below it, so one override disambiguates a whole tree. Worth setting
+    when two picks of the same model — or two selections through the same field
+    — would otherwise collide in an OpenAPI schema.
 
     The result is cached, so equal calls yield the same Protocol (and therefore
     the same projection class). The cache holds a reference to ``model``; call
@@ -76,6 +79,15 @@ def pick(
         raise TypeError(f"pick() expects a BaseModel subclass, got {model!r}")
     if not names:
         raise ValueError("pick() requires at least one field name to project")
+    # Path syntax is checked here, against what the caller actually typed:
+    # _protocol_for only ever sees the tail of a path it is descending into.
+    malformed = [n for n in names if not all(part for part in n.split("."))]
+    if malformed:
+        raise ValueError(
+            f"malformed field path {', '.join(repr(n) for n in malformed)}"
+        )
+    # Deduplicated before the cache lookup, so that equal selections written
+    # differently still resolve to one Protocol.
     return _protocol_for(model, tuple(dict.fromkeys(names)), metadata, aliases, name)
 
 
@@ -88,9 +100,11 @@ def _protocol_for(
     name: str | None,
 ) -> type[Any]:
     # Selection is validated here rather than in pick() because a dotted path
-    # recurses back through this function for each level it descends.
+    # recurses back through this function for each level it descends. Unknown
+    # heads are rejected first: a typo should be reported as a typo, not as
+    # whatever else it happens to conflict with.
+    _reject_unknown(model, tuple(dict.fromkeys(n.partition(".")[0] for n in names)))
     selection = _group_paths(names)
-    _reject_unknown(model, tuple(selection))
     protocol_name = name or f"{model.__name__}View"
 
     namespace = {
@@ -123,9 +137,7 @@ def _group_paths(names: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
     selection: dict[str, list[str]] = {}
     whole: set[str] = set()
     for entry in names:
-        head, dot, rest = entry.partition(".")
-        if dot and not (head and rest):
-            raise ValueError(f"malformed field path {entry!r}")
+        head, _, rest = entry.partition(".")
         selection.setdefault(head, [])
         if rest:
             selection[head].append(rest)
@@ -138,7 +150,7 @@ def _group_paths(names: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
             f"cannot pick both {', '.join(repr(h) for h in both)} and a path "
             "through it; pick the whole field or the paths beneath it, not both"
         )
-    return {head: tuple(paths) for head, paths in selection.items()}
+    return {head: tuple(dict.fromkeys(paths)) for head, paths in selection.items()}
 
 
 def _reject_unknown(model: type[BaseModel], names: tuple[str, ...]) -> None:
@@ -166,9 +178,20 @@ def _annotation_for(
     if field is not None:
         annotation = field.annotation
         if paths:
-            annotation = _select_through(
-                model, name, annotation, paths, parent, metadata, aliases
-            )
+            try:
+                annotation = _select_through(
+                    annotation,
+                    paths,
+                    f"{parent}{_camel(name)}",
+                    metadata=metadata,
+                    aliases=aliases,
+                )
+            except (ValueError, TypeError) as exc:
+                # One decoration point, so a failure at any depth reports the
+                # path that reached it rather than just the innermost model.
+                raise type(exc)(
+                    f"cannot select through {model.__name__}.{name}: {exc}"
+                ) from exc
         return _annotate(
             field, annotation, field.metadata, metadata=metadata, aliases=aliases
         )
@@ -190,47 +213,63 @@ def _annotation_for(
 
 
 def _select_through(
-    model: type[BaseModel],
-    name: str,
     annotation: Any,
     paths: tuple[str, ...],
-    parent: str,
+    name: str,
+    *,
     metadata: bool,
     aliases: bool,
 ) -> Any:
     """Swap the model inside ``annotation`` for a Protocol picking ``paths``."""
-    nested = _model_in(model, name, annotation)
-    try:
-        picked = _protocol_for(
-            nested, paths, metadata, aliases, f"{parent}{_camel(name)}"
-        )
-    except ValueError as exc:
-        raise ValueError(f"in {model.__name__}.{name}: {exc}") from exc
+    nested = _model_in(annotation)
+    picked = _protocol_for(nested, paths, metadata, aliases, name)
     return map_annotation(annotation, lambda leaf: picked if leaf is nested else leaf)
 
 
-def _model_in(model: type[BaseModel], name: str, annotation: Any) -> type[BaseModel]:
+def _model_in(annotation: Any) -> type[BaseModel]:
     """The single model reachable through ``annotation``; ambiguity is an error."""
-    found: list[type[BaseModel]] = []
+    found = _models_in(annotation)
 
-    def collect(leaf: Any) -> Any:
-        if isinstance(leaf, type) and issubclass(leaf, BaseModel) and leaf not in found:
-            found.append(leaf)
-        return leaf
-
-    map_annotation(annotation, collect)
-
-    if not found:
+    if any(in_key for _, in_key in found):
         raise ValueError(
-            f"cannot select through {model.__name__}.{name}: "
-            f"{annotation} contains no model to select from"
+            f"{_render(annotation)} holds it as a mapping key, "
+            "which identifies the entry rather than being part of it"
         )
-    if len(found) > 1:
+
+    models = list(dict.fromkeys(model for model, _ in found))
+    if not models:
+        raise ValueError(f"{_render(annotation)} contains no model to select from")
+    if len(models) > 1:
         raise ValueError(
-            f"cannot select through {model.__name__}.{name}: {annotation} is "
-            f"ambiguous between {', '.join(m.__name__ for m in found)}"
+            f"{_render(annotation)} is ambiguous between "
+            f"{', '.join(model.__name__ for model in models)}"
         )
-    return found[0]
+    return models[0]
+
+
+def _models_in(
+    annotation: Any,
+    *,
+    in_key: bool = False,
+) -> list[tuple[type[BaseModel], bool]]:
+    """Every model inside ``annotation``, flagged when it sits in a mapping key."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [(annotation, in_key)]
+
+    args = get_args(annotation)
+    origin = get_origin(annotation)
+    if isinstance(origin, type) and issubclass(origin, Mapping) and len(args) == 2:
+        key, value = args
+        return [*_models_in(key, in_key=True), *_models_in(value, in_key=in_key)]
+
+    return [model for arg in args for model in _models_in(arg, in_key=in_key)]
+
+
+def _render(annotation: Any) -> str:
+    """``float`` rather than ``<class 'float'>``, without flattening generics."""
+    if isinstance(annotation, type) and not get_args(annotation):
+        return annotation.__name__
+    return str(annotation)
 
 
 def _camel(name: str) -> str:
