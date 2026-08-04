@@ -199,24 +199,115 @@ pick(User, "id", "emial")
 
 A source that isn't a `BaseModel` subclass raises `TypeError`. Results are cached, so equal calls return the same Protocol and therefore the same projection class; `cache_clear()` clears it.
 
+#### Selecting through nested models
+
+A name may be a dotted path. `pick` follows it into a field typed as another model and publishes only the fields you named, to any depth:
+
+```python
+class City(BaseModel):
+    id: int
+    name: str
+    country_code: str
+
+
+class Address(BaseModel):
+    id: int
+    street: str
+    zip_code: str
+    city: City
+
+
+class Item(BaseModel):
+    id: int
+    sku: str
+    cost: float
+
+
+class Order(BaseModel):
+    id: int
+    total: float
+    address: Address
+    items: list[Item]
+
+
+OrderView = pick(Order, "id", "total", "address.street", "address.city.name")
+
+project(order, OrderView).model_dump_json()
+# -> '{"id":7,"total":9.5,"address":{"street":"1 Main St","city":{"name":"Paris"}}}'
+```
+
+Paths traverse containers, so `list[Model]`, `dict[str, Model]` and `Model | None` are selected through the same way:
+
+```python
+ItemsView = pick(Order, "id", "items.sku")
+
+project(order, ItemsView).model_dump_json()
+# -> '{"id":7,"items":[{"sku":"ABC"},{"sku":"DEF"}]}'
+```
+
+Naming a field *without* a path still publishes it whole, nested models included — unchanged, and still what you want when you want the whole thing:
+
+```python
+project(order, pick(Order, "id", "address")).model_dump_json()
+# -> '{"id":7,"address":{"id":3,"street":"1 Main St","zip_code":"75001","city":{"id":1,"name":"Paris","country_code":"FR"}}}'
+```
+
+Every nested level gets its own Protocol, named after its parent — `OrderView` + `address` gives `OrderViewAddress`, then `OrderViewAddressCity` — so two parents picking different subsets of the same model don't collide in an OpenAPI schema:
+
+```python
+projection(OrderView).model_json_schema()["$defs"].keys()
+# -> dict_keys(['OrderViewAddressCityProjection', 'OrderViewAddressProjection'])
+```
+
+That covers different parents. Two selections through the *same* field still produce two Protocols under one name — `pick(Order, "address.street")` and `pick(Order, "address.zip_code")` are both `OrderViewAddress` — so give one of them a `name=`. It prefixes every nested name below it, so a single override disambiguates the whole tree.
+
+`metadata=` and `aliases=` are inherited by every nested level.
+
+Paths are validated at `pick()` call time, like plain names, and the error names the path it failed on:
+
+```python
+pick(Order, "id", "address.stret")
+# -> ValueError: in Order.address: Address has no field 'stret'; available: city, id, street, zip_code
+
+pick(Order, "id", "total.amount")
+# -> ValueError: cannot select through Order.total: <class 'float'> contains no model to select from
+
+pick(Order, "address.")
+# -> ValueError: malformed field path 'address.'
+
+pick(Order, "address", "address.street")
+# -> ValueError: cannot pick both 'address' and a path through it; pick the whole field or the paths beneath it, not both
+```
+
+A head field whose annotation reaches several models (an ambiguous union) raises too, as does a path through a `@computed_field` — a computed field has a return type, not a model to descend into — and a model reached only as a mapping key (`dict[Model, str]`), since the key identifies the entry rather than being part of it.
+
 #### Narrowing a picked field
 
-The allowlist is one level deep: a picked field whose type is another `BaseModel` publishes that model whole. To narrow it — or to tighten an annotation the source declares as nullable — subclass the picked Protocol and restate only the fields you are changing:
+Paths cover nested selection. Subclassing covers what a path can't express: tightening an annotation the source declares as nullable, and getting a real `class` statement that is valid as a type. Subclass the picked Protocol and restate only the fields you are changing:
 
 ```python
 class Order(BaseModel):
     id: int | None = None  # SQLModel-style: nullable until the row is flushed
     total: float
-    address: Address       # a full model, published whole by a bare pick
+    address: Address
 
 
-class OrderView(pick(Order, "id", "total", "address"), Protocol):
-    id: int                    # narrowed: no longer nullable
-    address: AddressSummary    # the Protocol from above, projected recursively
+class OrderView(pick(Order, "id", "total", "address.street"), Protocol):
+    id: int  # narrowed: no longer nullable
 
+
+projection(OrderView).model_json_schema()["properties"]["id"]
+# -> {'title': 'Id', 'type': 'integer'}
 
 project(order, OrderView).model_dump_json()
-# -> '{"id":7,"total":9.5,"address":{"street":"1 Main St","zip_code":"75001"}}'
+# -> '{"id":7,"total":9.5,"address":{"street":"1 Main St"}}'
+```
+
+Without the override, the field is required but still nullable:
+
+```python
+projection(pick(Order, "id", "total")).model_json_schema()["properties"]["id"]
+# -> {'anyOf': [{'type': 'integer'}, {'type': 'null'}], 'title': 'Id'}
 ```
 
 The base class is picked, so the fields you don't restate still can't drift. And because this is a real `class` statement, `OrderView` is valid as a type — `owner: OrderView` type-checks, unlike the bare `pick(...)` result. Type checkers do flag the dynamic base class, so it needs a `# type: ignore[misc]`.
@@ -224,6 +315,8 @@ The base class is picked, so the fields you don't restate still can't drift. And
 ### Typing at the call site
 
 `project(instance, Proto)` is typed to return `Proto`, so `summary.name` resolves to `str` in mypy/pyright without a cast. At runtime the object is a `BaseModel` subclass that structurally satisfies the Protocol.
+
+Every call shape documented here is clean under `mypy --strict` — passing a Protocol class object to `project`, `projection`, `project_json`, `project_json_bytes`, `ProjectedResponse` or `openapi_response` does not need a `# type: ignore[type-abstract]`. `tests/typing_surface.py` type-checks each of them in CI.
 
 ### FastAPI integration
 
@@ -360,7 +453,6 @@ cache_clear()  # useful in test fixtures or hot-reload workflows
 - Config values passed via `config=` must be hashable for caching.
 - `pick()` synthesizes its Protocol at runtime, so type checkers see `Any`. `UserView = pick(...)` is a variable, not a class statement: using it as an annotation (`owner: UserView`) is a mypy error (`Variable "UserView" is not valid as a type`) even though it works at runtime. The field names are strings, so typos and renames are not caught statically either — `pick()` validates them eagerly at call time to compensate. [Subclassing the result](#narrowing-a-picked-field) gets you back a real class statement that is valid as a type, at the cost of one `# type: ignore[misc]` for the dynamic base class.
 - `pick()` cannot invent non-nullability. A SQLModel `table=True` class annotates its primary key `id: int | None`, so `pick(Model, "id")` yields `int | None` — required, but still nullable in the schema. `pick` fixes required-ness, not the annotation; [subclass the picked Protocol](#narrowing-a-picked-field) and restate that one field to narrow it.
-- `pick()`'s allowlist is one level deep. A picked field typed as another `BaseModel` publishes that model whole, including columns you would not have picked — [narrow it](#narrowing-a-picked-field) with a Protocol-typed override.
 
 ## Development
 
@@ -369,7 +461,7 @@ uv sync
 uv run pytest
 uv run python scripts/validate_tests.py
 uv run ruff check src/ tests/ benches/ scripts/
-uv run mypy src/
+uv run mypy src/ tests/typing_surface.py
 uv run coverage run -m pytest && uv run coverage report
 uv run pytest benches/ --benchmark-only    # perf micro-benches
 ```

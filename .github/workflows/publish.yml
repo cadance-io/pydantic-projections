@@ -25,7 +25,7 @@ jobs:
           fi
       - run: uv run ruff check src/ tests/ scripts/
       - run: uv run ruff format --check src/ tests/ scripts/
-      - run: uv run mypy src/
+      - run: uv run mypy src/ tests/typing_surface.py
       - run: uv run python scripts/validate_tests.py
       - run: uv run coverage run -m pytest
       - run: uv run coverage report

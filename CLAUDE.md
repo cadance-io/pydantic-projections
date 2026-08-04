@@ -8,7 +8,7 @@ Elegant projection of Pydantic BaseModels through Python Protocols.
 - **Coverage:** `uv run coverage run -m pytest && uv run coverage report` (threshold 92%)
 - **Lint:** `uv run ruff check src/ tests/`
 - **Format:** `uv run ruff format src/ tests/`
-- **Type check:** `uv run mypy src/`
+- **Type check:** `uv run mypy src/ tests/typing_surface.py`
 - **Validate test shape:** `uv run python scripts/validate_tests.py`
 - **CI locally:** the steps above match `.github/workflows/ci.yml` across Python 3.11–3.13
 
@@ -17,6 +17,7 @@ Elegant projection of Pydantic BaseModels through Python Protocols.
 - `src/pydantic_projections/` — library source
 - `tests/` — BDD-style with pytest-describe (`describe_`/`when_`/`it_`)
 - `tests/models.py` — shared `BaseModel` / `Protocol` fixtures used across tests
+- `tests/typing_surface.py` — call-site typing guard; not collected by pytest, type-checked in CI
 - `scripts/validate_tests.py` — enforces describe/when/it conventions
 - `scripts/release.py` — release automation (see below)
 - `.claude/hooks/validate_tests.py` — PostToolUse hook shim that runs the validator per-file

@@ -24,7 +24,7 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from starlette.background import BackgroundTask
 
@@ -59,7 +59,7 @@ class ProjectedResponse(Response):
     def __init__(
         self,
         instance: Any,
-        protocol: type[P],
+        protocol: Callable[..., P],
         *,
         status_code: int = 200,
         headers: Mapping[str, str] | None = None,
@@ -82,7 +82,7 @@ class ProjectedResponse(Response):
         return project_json_bytes(self._instance, self._protocol, **self._dump_kwargs)
 
 
-def openapi_response(protocol: type[P]) -> dict[str, Any]:
+def openapi_response(protocol: Callable[..., P]) -> dict[str, Any]:
     """FastAPI ``responses=`` entry for a projection.
 
     Use alongside :class:`ProjectedResponse` so the OpenAPI spec advertises

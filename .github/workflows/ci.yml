@@ -42,7 +42,7 @@ jobs:
         run: uv run ruff format --check src/ tests/ scripts/
 
       - name: Mypy
-        run: uv run mypy src/
+        run: uv run mypy src/ tests/typing_surface.py
 
       - name: Tests with coverage
         run: |

@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-import types
 from functools import cache
 from typing import (
+    TYPE_CHECKING,
     Any,
     Generic,
     Protocol,
     TypeVar,
-    Union,
     cast,
-    get_args,
-    get_origin,
     get_type_hints,
 )
 
 from pydantic import BaseModel, ConfigDict, ValidationError, create_model
+
+from ._annotations import map_annotation
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 P = TypeVar("P")
 
@@ -38,8 +40,12 @@ class ProjectionError(ValueError):
         self.validation_error = validation_error
 
 
+# `protocol` is a class, but annotating it `type[P]` makes mypy reject every
+# call that passes a Protocol (`type-abstract`), which is the documented usage.
+# `Callable[..., P]` keeps inference and admits one absurd call — a factory
+# returning P — which the isinstance check below rejects at runtime.
 def projection(
-    protocol: type[P],
+    protocol: Callable[..., P],
     *,
     config: ConfigDict | None = None,
     frozen: bool = True,
@@ -59,10 +65,10 @@ def projection(
     """
     if not isinstance(protocol, type):
         raise TypeError(f"projection() expects a Protocol class, got {protocol!r}")
-    return _build(cast("type", protocol), frozen, _freeze_config(config))
+    return _build(protocol, frozen, _freeze_config(config))
 
 
-def project(instance: Any, protocol: type[P]) -> P:
+def project(instance: Any, protocol: Callable[..., P]) -> P:
     """Project ``instance`` through ``protocol``, returning a typed projection model.
 
     Raises :class:`ProjectionError` if the instance does not satisfy the Protocol.
@@ -72,7 +78,7 @@ def project(instance: Any, protocol: type[P]) -> P:
 
 def project_json(
     instance: Any,
-    protocol: type[P],
+    protocol: Callable[..., P],
     **dump_kwargs: Any,
 ) -> str:
     """Shortcut for ``project(instance, protocol).model_dump_json(**kwargs)``.
@@ -86,7 +92,7 @@ def project_json(
 
 def project_json_bytes(
     instance: Any,
-    protocol: type[P],
+    protocol: Callable[..., P],
     **dump_kwargs: Any,
 ) -> bytes:
     """Project ``instance`` through ``protocol`` and emit JSON bytes in one pass.
@@ -100,7 +106,7 @@ def project_json_bytes(
     return model_cls.__pydantic_serializer__.to_json(projected, **dump_kwargs)
 
 
-def _project_one(instance: Any, protocol: type[P]) -> BaseModel:
+def _project_one(instance: Any, protocol: Callable[..., P]) -> BaseModel:
     model_cls = projection(protocol)
     try:
         return cast(
@@ -113,7 +119,9 @@ def _project_one(instance: Any, protocol: type[P]) -> BaseModel:
         raise ProjectionError(
             f"{type(instance).__name__} does not satisfy "
             f"{getattr(protocol, '__name__', protocol)!r}: {exc}",
-            protocol=protocol,
+            # projection() above rejects anything that is not a class, so the
+            # public `.protocol` attribute stays precisely typed.
+            protocol=cast("type", protocol),
             source_type=type(instance),
             validation_error=exc,
         ) from exc
@@ -215,22 +223,10 @@ def _substitute(
     configuration applied at the top level (e.g. an ``alias_generator``) also
     applies to every Protocol reachable through containers and unions.
     """
-    if _is_protocol(annotation):
-        return _build(annotation, frozen, config_items)
 
-    origin = get_origin(annotation)
-    if origin is None:
-        return annotation
+    def project_protocols(candidate: Any) -> Any:
+        if _is_protocol(candidate):
+            return _build(candidate, frozen, config_items)
+        return candidate
 
-    args = get_args(annotation)
-    new_args = tuple(_substitute(a, frozen, config_items) for a in args)
-    if new_args == args:
-        return annotation
-
-    if origin is Union or origin is types.UnionType:
-        merged = new_args[0]
-        for arg in new_args[1:]:
-            merged = merged | arg
-        return merged
-
-    return origin[new_args] if len(new_args) != 1 else origin[new_args[0]]
+    return map_annotation(annotation, project_protocols)

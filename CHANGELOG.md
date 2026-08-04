@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Dotted paths in `pick()` — a name may now be a path, so `pick(Order, "id", "address.street", "address.city.name")` selects through a field typed as another model instead of publishing that model whole. Paths descend to any depth and traverse containers, so `list[Model]`, `dict[str, Model]` and `Model | None` are all selected through. Naming a field without a path still publishes it whole, nested models included — unchanged, and still what you want when you want the whole thing. Each nested level gets its own Protocol named after its parent (`OrderView` + `address` gives `OrderViewAddress`, then `OrderViewAddressCity`), so two parents picking different subsets of the same model do not collide in an OpenAPI schema; `metadata=` and `aliases=` are inherited by every level. Selection is validated at `pick()` call time, import time in practice: a head field whose annotation resolves to no model or to several (an ambiguous union) raises `ValueError`, as does a path through a `@computed_field`, a model reached only as a mapping key (`dict[Model, str]` — the key identifies the entry rather than being part of it), an unknown leaf (the error names the path it failed on), a malformed path such as `"address."`, and picking both a field and a path through it. Closes #5.
+
+### Fixed
+- The documented call shapes are now clean under `mypy --strict`. Every public entry point declared `protocol: type[P]`, and mypy emits `type-abstract` whenever a Protocol class object is passed to a `type[T]` parameter — so `project(user, UserSummary)` was an error under `--strict` for an ordinary hand-written Protocol, across `project`, `projection`, `project_json`, `project_json_bytes`, `ProjectedResponse` and `openapi_response`. Present since 0.1.0 and invisible because CI only ran mypy over `src/`. The parameter is now `Callable[..., P]`: the error is gone, inference is unchanged (`project(u, UserSummary)` still reveals `UserSummary`), a non-callable argument is still rejected statically, and anything that is not a Protocol class still raises `TypeError` at runtime. Closes #6.
+- `ProjectedResponse` and `openapi_response` are now listed in `__all__`. They were only implicitly re-exported, so importing them from `pydantic_projections` failed under `mypy --strict`. A new `tests/typing_surface.py` — not collected by pytest — is type-checked in CI so neither regresses silently.
+
 ## [0.5.0] - 2026-08-04
 
 ### Added
