@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-05
+
 ### Fixed
 - The distribution now ships a `py.typed` marker, so consumers actually see the library's types. Without it mypy reports `Skipping analyzing "pydantic_projections": module is installed, but missing library stubs or py.typed marker` and every downstream project has to add an `ignore_missing_imports` override — which silences the error by discarding the annotations, defeating the `Callable[..., P]` work in 0.6.0. The package has advertised `Typing :: Typed` since the first release while the marker was never present, so the classifier was inaccurate for every version through 0.6.0. `hatchling` picks the file up from the package directory with no build-config change. The publish workflow now inspects the built wheel and fails if the marker is absent, so this cannot regress into a release again.
 
@@ -77,7 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Class caching per Protocol via `functools.cache`.
 - pytest-describe test suite with AST-based structure validator.
 
-[Unreleased]: https://github.com/cadance-io/pydantic-projections/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/cadance-io/pydantic-projections/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/cadance-io/pydantic-projections/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.3.0...v0.4.0
