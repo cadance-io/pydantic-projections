@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol
 from pydantic import BaseModel, Field
 from pydantic_core import PydanticUndefined
 
+from ._annotations import map_annotation
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -31,9 +33,14 @@ def pick(
 
     An allowlist: a field added to ``model`` later stays private until someone
     opts it in. Annotations come from the source, so they cannot drift from it.
-    The allowlist is one level deep — a picked field whose type is another
-    ``BaseModel`` publishes that model whole. Nest a Protocol member typed as a
-    ``pick`` of that model to narrow it.
+
+    A name may be a dotted path, selecting through a field typed as another
+    model — including through ``list``, ``dict`` and ``| None`` — to any depth::
+
+        pick(Order, "id", "address.street", "address.city.name")
+
+    Naming a field without a path publishes that field whole, nested models
+    included. Picking both a field and a path through it is an error.
 
     The result is an ordinary Protocol — pass it to :func:`project`,
     :func:`projection`, ``ProjectedResponse``, nest it inside another Protocol,
@@ -69,9 +76,7 @@ def pick(
         raise TypeError(f"pick() expects a BaseModel subclass, got {model!r}")
     if not names:
         raise ValueError("pick() requires at least one field name to project")
-    unique = tuple(dict.fromkeys(names))
-    _reject_unknown(model, unique)
-    return _protocol_for(model, unique, metadata, aliases, name)
+    return _protocol_for(model, tuple(dict.fromkeys(names)), metadata, aliases, name)
 
 
 @cache
@@ -82,19 +87,58 @@ def _protocol_for(
     aliases: bool,
     name: str | None,
 ) -> type[Any]:
+    # Selection is validated here rather than in pick() because a dotted path
+    # recurses back through this function for each level it descends.
+    selection = _group_paths(names)
+    _reject_unknown(model, tuple(selection))
+    protocol_name = name or f"{model.__name__}View"
+
     namespace = {
         "__annotations__": {
-            field: _annotation_for(model, field, metadata=metadata, aliases=aliases)
-            for field in names
+            field: _annotation_for(
+                model,
+                field,
+                paths,
+                parent=protocol_name,
+                metadata=metadata,
+                aliases=aliases,
+            )
+            for field, paths in selection.items()
         },
         # Keeps forward references inside the source's annotations resolvable.
         "__module__": model.__module__,
     }
     return types.new_class(
-        name or f"{model.__name__}View",
+        protocol_name,
         (Protocol,),
         exec_body=lambda ns: ns.update(namespace),
     )
+
+
+def _group_paths(names: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
+    """Map each head field to the paths selected beneath it, in source order.
+
+    An empty tuple means the field itself was picked, not a path through it.
+    """
+    selection: dict[str, list[str]] = {}
+    whole: set[str] = set()
+    for entry in names:
+        head, dot, rest = entry.partition(".")
+        if dot and not (head and rest):
+            raise ValueError(f"malformed field path {entry!r}")
+        selection.setdefault(head, [])
+        if rest:
+            selection[head].append(rest)
+        else:
+            whole.add(head)
+
+    both = [head for head, paths in selection.items() if paths and head in whole]
+    if both:
+        raise ValueError(
+            f"cannot pick both {', '.join(repr(h) for h in both)} and a path "
+            "through it; pick the whole field or the paths beneath it, not both"
+        )
+    return {head: tuple(paths) for head, paths in selection.items()}
 
 
 def _reject_unknown(model: type[BaseModel], names: tuple[str, ...]) -> None:
@@ -112,16 +156,28 @@ def _reject_unknown(model: type[BaseModel], names: tuple[str, ...]) -> None:
 def _annotation_for(
     model: type[BaseModel],
     name: str,
+    paths: tuple[str, ...],
     *,
+    parent: str,
     metadata: bool,
     aliases: bool,
 ) -> Any:
     field = model.model_fields.get(name)
     if field is not None:
+        annotation = field.annotation
+        if paths:
+            annotation = _select_through(
+                model, name, annotation, paths, parent, metadata, aliases
+            )
         return _annotate(
-            field, field.annotation, field.metadata, metadata=metadata, aliases=aliases
+            field, annotation, field.metadata, metadata=metadata, aliases=aliases
         )
 
+    if paths:
+        raise ValueError(
+            f"cannot select through {model.__name__}.{name}: "
+            "it is a computed field, not a model field"
+        )
     computed = model.model_computed_fields[name]
     if computed.return_type is PydanticUndefined:
         raise TypeError(
@@ -131,6 +187,54 @@ def _annotation_for(
     return _annotate(
         computed, computed.return_type, (), metadata=metadata, aliases=aliases
     )
+
+
+def _select_through(
+    model: type[BaseModel],
+    name: str,
+    annotation: Any,
+    paths: tuple[str, ...],
+    parent: str,
+    metadata: bool,
+    aliases: bool,
+) -> Any:
+    """Swap the model inside ``annotation`` for a Protocol picking ``paths``."""
+    nested = _model_in(model, name, annotation)
+    try:
+        picked = _protocol_for(
+            nested, paths, metadata, aliases, f"{parent}{_camel(name)}"
+        )
+    except ValueError as exc:
+        raise ValueError(f"in {model.__name__}.{name}: {exc}") from exc
+    return map_annotation(annotation, lambda leaf: picked if leaf is nested else leaf)
+
+
+def _model_in(model: type[BaseModel], name: str, annotation: Any) -> type[BaseModel]:
+    """The single model reachable through ``annotation``; ambiguity is an error."""
+    found: list[type[BaseModel]] = []
+
+    def collect(leaf: Any) -> Any:
+        if isinstance(leaf, type) and issubclass(leaf, BaseModel) and leaf not in found:
+            found.append(leaf)
+        return leaf
+
+    map_annotation(annotation, collect)
+
+    if not found:
+        raise ValueError(
+            f"cannot select through {model.__name__}.{name}: "
+            f"{annotation} contains no model to select from"
+        )
+    if len(found) > 1:
+        raise ValueError(
+            f"cannot select through {model.__name__}.{name}: {annotation} is "
+            f"ambiguous between {', '.join(m.__name__ for m in found)}"
+        )
+    return found[0]
+
+
+def _camel(name: str) -> str:
+    return "".join(part[:1].upper() + part[1:] for part in name.split("_"))
 
 
 def _annotate(

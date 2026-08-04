@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import types
 from functools import cache
 from typing import (
     TYPE_CHECKING,
@@ -8,14 +7,13 @@ from typing import (
     Generic,
     Protocol,
     TypeVar,
-    Union,
     cast,
-    get_args,
-    get_origin,
     get_type_hints,
 )
 
 from pydantic import BaseModel, ConfigDict, ValidationError, create_model
+
+from ._annotations import map_annotation
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -221,22 +219,10 @@ def _substitute(
     configuration applied at the top level (e.g. an ``alias_generator``) also
     applies to every Protocol reachable through containers and unions.
     """
-    if _is_protocol(annotation):
-        return _build(annotation, frozen, config_items)
 
-    origin = get_origin(annotation)
-    if origin is None:
-        return annotation
+    def project_protocols(candidate: Any) -> Any:
+        if _is_protocol(candidate):
+            return _build(candidate, frozen, config_items)
+        return candidate
 
-    args = get_args(annotation)
-    new_args = tuple(_substitute(a, frozen, config_items) for a in args)
-    if new_args == args:
-        return annotation
-
-    if origin is Union or origin is types.UnionType:
-        merged = new_args[0]
-        for arg in new_args[1:]:
-            merged = merged | arg
-        return merged
-
-    return origin[new_args] if len(new_args) != 1 else origin[new_args[0]]
+    return map_annotation(annotation, project_protocols)
