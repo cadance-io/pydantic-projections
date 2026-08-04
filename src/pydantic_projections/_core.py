@@ -100,14 +100,6 @@ def project_json_bytes(
     return model_cls.__pydantic_serializer__.to_json(projected, **dump_kwargs)
 
 
-def cache_clear() -> None:
-    """Clear the projection class cache.
-
-    Useful in test fixtures that redefine Protocols or in hot-reload workflows.
-    """
-    _build.cache_clear()
-
-
 def _project_one(instance: Any, protocol: type[P]) -> BaseModel:
     model_cls = projection(protocol)
     try:
@@ -176,9 +168,13 @@ def _build(
 
 
 def _collect_field_hints(protocol: type) -> dict[str, Any]:
-    """Merge annotated attributes and ``@property`` declarations into one dict."""
+    """Merge annotated attributes and ``@property`` declarations into one dict.
+
+    ``include_extras=True`` keeps ``Annotated[T, Field(...)]`` metadata intact, so
+    constraints and schema hints declared on the Protocol reach the built model.
+    """
     try:
-        hints = dict(get_type_hints(protocol))
+        hints = dict(get_type_hints(protocol, include_extras=True))
     except Exception as exc:
         raise TypeError(
             f"Could not resolve annotations on {protocol!r}: {exc}"
@@ -193,7 +189,7 @@ def _collect_field_hints(protocol: type) -> dict[str, Any]:
             if not (isinstance(value, property) and value.fget is not None):
                 continue
             try:
-                prop_hints = get_type_hints(value.fget)
+                prop_hints = get_type_hints(value.fget, include_extras=True)
             except Exception:  # noqa: S112
                 continue
             if "return" in prop_hints:
