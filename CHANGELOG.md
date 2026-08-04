@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-05
+
 ### Added
 - Dotted paths in `pick()` — a name may now be a path, so `pick(Order, "id", "address.street", "address.city.name")` selects through a field typed as another model instead of publishing that model whole. Paths descend to any depth and traverse containers, so `list[Model]`, `dict[str, Model]` and `Model | None` are all selected through. Naming a field without a path still publishes it whole, nested models included — unchanged, and still what you want when you want the whole thing. Each nested level gets its own Protocol named after its parent (`OrderView` + `address` gives `OrderViewAddress`, then `OrderViewAddressCity`), so two parents picking different subsets of the same model do not collide in an OpenAPI schema; `metadata=` and `aliases=` are inherited by every level. Selection is validated at `pick()` call time, import time in practice: a head field whose annotation resolves to no model or to several (an ambiguous union) raises `ValueError`, as does a path through a `@computed_field`, a model reached only as a mapping key (`dict[Model, str]` — the key identifies the entry rather than being part of it), an unknown leaf (the error names the path it failed on), a malformed path such as `"address."`, and picking both a field and a path through it. Closes #5.
 
@@ -72,7 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Class caching per Protocol via `functools.cache`.
 - pytest-describe test suite with AST-based structure validator.
 
-[Unreleased]: https://github.com/cadance-io/pydantic-projections/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/cadance-io/pydantic-projections/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cadance-io/pydantic-projections/releases/tag/v0.3.0
