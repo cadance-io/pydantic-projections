@@ -30,6 +30,16 @@ jobs:
       - run: uv run coverage run -m pytest
       - run: uv run coverage report
       - run: uv build
+      - name: Verify the wheel ships py.typed
+        run: |
+          uv run python - <<'PY'
+          import glob, sys, zipfile
+
+          wheel = sorted(glob.glob("dist/*.whl"))[-1]
+          if "pydantic_projections/py.typed" not in zipfile.ZipFile(wheel).namelist():
+              sys.exit(f"::error::{wheel} ships no py.typed — consumers cannot see the types")
+          print(f"{wheel} ships py.typed")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: dist
