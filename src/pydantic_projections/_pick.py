@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import types
 from collections.abc import Mapping
 from functools import cache
@@ -21,6 +22,13 @@ if TYPE_CHECKING:
 # alias would redirect `from_attributes` lookup to an attribute the source
 # instance does not have.
 _CARRIED = ("title", "description", "examples", "json_schema_extra", "deprecated")
+
+# The OpenAPI 3 rule for a key of `components/schemas`, which a name becomes.
+_OPENAPI_KEY = re.compile(r"[A-Za-z0-9._-]+")
+
+# One explicit name states one published contract, so a second selection
+# under it is refused. Default names are derived and may repeat.
+_picked_by_name: dict[str, type[Any]] = {}
 
 
 def pick(
@@ -67,9 +75,11 @@ def pick(
     the source instance does not have, leaving the projection unusable.
 
     ``name`` overrides the generated Protocol's name, and prefixes every nested
-    name below it, so one override disambiguates a whole tree. Worth setting
-    when two picks of the same model — or two selections through the same field
-    — would otherwise collide in an OpenAPI schema.
+    name below it, so one override disambiguates a whole tree. The projection
+    class, and so the OpenAPI schema, takes the same name. Worth setting when
+    two picks of the same model — or two selections through the same field —
+    would otherwise collide in an OpenAPI schema. It must be a ``str`` that is
+    a valid OpenAPI schema key, and no other selection may use it.
 
     The result is cached, so equal calls yield the same Protocol (and therefore
     the same projection class). The cache holds a reference to ``model``; call
@@ -86,9 +96,33 @@ def pick(
         raise ValueError(
             f"malformed field path {', '.join(repr(n) for n in malformed)}"
         )
+    if name is not None:
+        _check_name(name)
     # Deduplicated before the cache lookup, so that equal selections written
     # differently still resolve to one Protocol.
-    return _protocol_for(model, tuple(dict.fromkeys(names)), metadata, aliases, name)
+    picked = _protocol_for(model, tuple(dict.fromkeys(names)), metadata, aliases, name)
+    if name is not None:
+        _claim_name(name, picked)
+    return picked
+
+
+def _check_name(name: str) -> None:
+    if not isinstance(name, str):
+        raise TypeError(f"pick() name must be a str, got {name!r}")
+    if not _OPENAPI_KEY.fullmatch(name):
+        raise ValueError(
+            f"pick() name {name!r} is not a valid OpenAPI schema key; "
+            "use letters, digits, '.', '-' and '_'"
+        )
+
+
+def _claim_name(name: str, picked: type[Any]) -> None:
+    owner = _picked_by_name.setdefault(name, picked)
+    if owner is not picked:
+        raise ValueError(
+            f"pick() name {name!r} already names another selection; "
+            "one name publishes one schema, so choose another name"
+        )
 
 
 @cache

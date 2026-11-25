@@ -7,6 +7,10 @@ from pydantic_projections import project, projection
 
 
 def describe_projection():
+    def when_built():
+        def it_takes_the_qualified_name_of_its_protocol():
+            assert projection(UserSummary).__qualname__ == "UserSummary"
+
     def when_called_twice():
         def with_the_same_protocol():
             def it_returns_the_same_cached_class():

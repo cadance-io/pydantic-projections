@@ -61,6 +61,10 @@ def projection(
     Pass ``config`` to merge additional ``ConfigDict`` options (e.g.
     ``alias_generator``) and ``frozen=False`` to opt back in to mutation.
 
+    The class takes the Protocol's name and docstring, so FastAPI publishes the
+    OpenAPI schema under the Protocol's name, with its docstring as the
+    ``description``.
+
     The result is cached per ``(protocol, config, frozen)``. Config values must
     be hashable.
     """
@@ -170,8 +174,9 @@ def _build(
     cfg["frozen"] = frozen
 
     return create_model(
-        f"{protocol.__name__}Projection",
+        protocol.__name__,
         __config__=cast("ConfigDict", cfg),
+        __doc__=protocol.__doc__,
         **fields,
     )
 

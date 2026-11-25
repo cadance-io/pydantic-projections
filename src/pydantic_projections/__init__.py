@@ -26,7 +26,7 @@ from ._core import (
     project_json_bytes,
     projection,
 )
-from ._pick import _protocol_for, pick
+from ._pick import _picked_by_name, _protocol_for, pick
 
 if TYPE_CHECKING:
     # Re-exported lazily via __getattr__ to avoid importing fastapi when unused.
@@ -54,6 +54,7 @@ def cache_clear() -> None:
     """
     _build.cache_clear()
     _protocol_for.cache_clear()
+    _picked_by_name.clear()
 
 
 _LAZY_FASTAPI_EXPORTS = frozenset({"ProjectedResponse", "openapi_response"})

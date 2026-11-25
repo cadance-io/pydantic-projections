@@ -6,6 +6,8 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from typing import Protocol
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from models import (
@@ -16,7 +18,13 @@ from models import (
     UserWithAddressSummary,
 )
 
-from pydantic_projections import ProjectedResponse, ProjectionError, openapi_response
+from pydantic_projections import (
+    ProjectedResponse,
+    ProjectionError,
+    openapi_response,
+    pick,
+    projection,
+)
 
 
 def describe_ProjectedResponse():
@@ -157,7 +165,7 @@ def describe_openapi_response():
             ref = spec["paths"]["/u"]["get"]["responses"]["200"]["content"][
                 "application/json"
             ]["schema"]["$ref"]
-            assert ref.endswith("/UserSummaryProjection")
+            assert ref.endswith("/UserSummary")
 
         def with_other_status_codes_in_the_responses_dict():
             def it_advertises_each_models_schema_at_its_status_code():
@@ -191,5 +199,41 @@ def describe_openapi_response():
                 nf_ref = responses["404"]["content"]["application/json"]["schema"][
                     "$ref"
                 ]
-                assert ok_ref.endswith("/UserSummaryProjection")
+                assert ok_ref.endswith("/UserSummary")
                 assert nf_ref.endswith("/NotFound")
+
+
+def describe_projection():
+    def when_used_as_a_response_model():
+        def it_publishes_the_name_of_its_protocol():
+            app = FastAPI()
+            user_response = pick(User, "id", "name", name="UserResponse")
+
+            @app.get("/u", response_model=projection(user_response))
+            def get_user() -> object:
+                return User(id=1, name="Alice", email="a@b.c", password_hash="s")
+
+            spec = TestClient(app).get("/openapi.json").json()
+
+            ref = spec["paths"]["/u"]["get"]["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            assert ref == "#/components/schemas/UserResponse"
+
+        def with_a_docstring_on_the_protocol():
+            def it_publishes_it_as_the_schema_description():
+                class UserCard(Protocol):
+                    """A user as the public API shows it."""
+
+                    id: int
+
+                app = FastAPI()
+
+                @app.get("/u", response_model=projection(UserCard))
+                def get_user() -> object:
+                    return User(id=1, name="Alice", email="a@b.c", password_hash="s")
+
+                spec = TestClient(app).get("/openapi.json").json()
+
+                schema = spec["components"]["schemas"]["UserCard"]
+                assert schema["description"] == "A user as the public API shows it."

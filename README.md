@@ -181,7 +181,7 @@ def get_user_fast(id: int) -> Response:
     return ProjectedResponse(db.get_user(id), UserView)
 ```
 
-Both return `{"id":1,"email":"alice@example.com","created_at":"2026-01-01T00:00:00"}`, and the second advertises `$ref: '#/components/schemas/UserViewProjection'` in the spec.
+Both return `{"id":1,"email":"alice@example.com","created_at":"2026-01-01T00:00:00"}`, and the second advertises `$ref: '#/components/schemas/UserView'` in the spec.
 
 `pick` is an allowlist: a column added to `User` later stays private until someone opts it in. There is deliberately no `omit()` counterpart — a denylist publishes every new column by default, which is the failure mode `pick` exists to remove.
 
@@ -189,7 +189,7 @@ Both return `{"id":1,"email":"alice@example.com","created_at":"2026-01-01T00:00:
 - Constraints (`min_length`, `gt`, …) and schema documentation (`title`, `description`, `examples`, `json_schema_extra`, `deprecated`) carry over. Pass `metadata=False` for bare annotations.
 - Aliases are dropped by default: a validation alias makes pydantic look the attribute up under a name the source instance does not have, which breaks `from_attributes`. Pass `aliases=True` to carry the source's *serialization* alias, so a dump with `by_alias=True` matches the source's wire format while validation still reads the attribute name.
 - `@computed_field` members are pickable; their return type is used.
-- `name=` overrides the generated Protocol's name (default `f"{Model.__name__}View"`, so `UserView` projects to `UserViewProjection`). Set it when two picks of the same model would otherwise collide in an OpenAPI schema.
+- `name=` overrides the generated Protocol's name, which is `f"{Model.__name__}View"` by default. The projection class and the OpenAPI schema take the same name, so `pick(User, "id", "email", name="UserResponse")` publishes `UserResponse`. Set it when two picks of the same model would otherwise collide in an OpenAPI schema. The name must be a valid OpenAPI schema key (letters, digits, `.`, `-`, `_`), else `pick()` raises `ValueError`. A name that another selection already uses raises `ValueError` too, because one name publishes one schema. A default name is not checked, so two default picks of one model can still share a name.
 - Unknown names raise at `pick()` call time — import time in practice, not on the first request:
 
 ```python
@@ -256,10 +256,10 @@ Every nested level gets its own Protocol, named after its parent — `OrderView`
 
 ```python
 projection(OrderView).model_json_schema()["$defs"].keys()
-# -> dict_keys(['OrderViewAddressCityProjection', 'OrderViewAddressProjection'])
+# -> dict_keys(['OrderViewAddressCity', 'OrderViewAddress'])
 ```
 
-That covers different parents. Two selections through the *same* field still produce two Protocols under one name — `pick(Order, "address.street")` and `pick(Order, "address.zip_code")` are both `OrderViewAddress` — so give one of them a `name=`. It prefixes every nested name below it, so a single override disambiguates the whole tree.
+That covers different parents. Two selections through the *same* field still produce two Protocols under one name — `pick(Order, "address.street")` and `pick(Order, "address.zip_code")` are both `OrderViewAddress` — so give one of them a `name=`. FastAPI publishes two classes with one name under mangled names that contain the module path, with no error. The name prefixes every nested name below it, so a single override disambiguates the whole tree.
 
 `metadata=` and `aliases=` are inherited by every nested level.
 
@@ -336,6 +336,8 @@ def get_user(id: int) -> User:
     return db.get_user(id)  # returns the fat User; caller sees only UserSummary's fields
 ```
 
+The class takes the Protocol's name and docstring. FastAPI publishes them as the OpenAPI schema name and its `description`, and from there as the type name and doc comment in every generated client.
+
 This path still goes through FastAPI's full `serialize_response` + `jsonable_encoder` + `json.dumps` chain every request. Fine for most endpoints.
 
 **High-throughput: `ProjectedResponse`.** For hot paths, return a `ProjectedResponse` instead. It bypasses `serialize_response`/`jsonable_encoder` entirely and emits JSON bytes via two Rust-backed calls (validate, then serialize) on the projection class's `__pydantic_validator__` and `__pydantic_serializer__`, with no `jsonable_encoder` / `json.dumps` step in between:
@@ -372,7 +374,7 @@ def get_user(id: int) -> Response:
     return ProjectedResponse(db.get_user(id), UserSummary)
 ```
 
-This advertises the projection's schema in the spec (`$ref: '#/components/schemas/UserSummaryProjection'`) without re-running serialization on the response path. `openapi_response()` returns a `{"model": ...}` entry, so it composes naturally with other status codes: `responses={200: openapi_response(UserSummary), 404: {"model": NotFound}}`.
+This advertises the projection's schema in the spec (`$ref: '#/components/schemas/UserSummary'`) without re-running serialization on the response path. `openapi_response()` returns a `{"model": ...}` entry, so it composes naturally with other status codes: `responses={200: openapi_response(UserSummary), 404: {"model": NotFound}}`.
 
 See `benches/test_render_bench.py` for the comparison; in our measurements `ProjectedResponse` is roughly 2–4× faster than the `response_model=projection(...)` path on raw ser/deser work, depending on FastAPI version and response shape. Note that FastAPI's `TestClient` is a poor way to measure this — its per-call transport setup dominates — use `uvicorn` + an external HTTP benchmark tool (`wrk`, `hey`, `oha`) for end-to-end numbers.
 
