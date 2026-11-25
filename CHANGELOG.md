@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `projection(protocol, name=...)` overrides the generated class's name, which is `f"{protocol.__name__}Projection"` by default. FastAPI publishes that name as the OpenAPI schema name, so `projection(pick(User, "id", "email"), name="UserResponse")` now publishes `UserResponse` instead of `UserViewProjection`, and generated clients name the type after the server symbol. The name applies to the outer class only; nested projections keep their default names. A name that is not a Python identifier raises `ValueError`. The cache key now includes the name, so a named and an unnamed projection of one Protocol are two classes. Closes #9.
+
 ## [0.6.1] - 2026-08-05
 
 ### Fixed

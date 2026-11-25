@@ -47,6 +47,7 @@ class ProjectionError(ValueError):
 def projection(
     protocol: Callable[..., P],
     *,
+    name: str | None = None,
     config: ConfigDict | None = None,
     frozen: bool = True,
 ) -> type[BaseModel]:
@@ -60,12 +61,18 @@ def projection(
     Pass ``config`` to merge additional ``ConfigDict`` options (e.g.
     ``alias_generator``) and ``frozen=False`` to opt back in to mutation.
 
-    The result is cached per ``(protocol, config, frozen)``. Config values must
-    be hashable.
+    ``name`` overrides the generated class's name, which is
+    ``f"{protocol.__name__}Projection"`` by default. FastAPI publishes that name
+    as the OpenAPI schema name. Nested projections keep their default names.
+
+    The result is cached per ``(protocol, name, config, frozen)``. Config values
+    must be hashable.
     """
     if not isinstance(protocol, type):
         raise TypeError(f"projection() expects a Protocol class, got {protocol!r}")
-    return _build(protocol, frozen, _freeze_config(config))
+    if name is not None and not name.isidentifier():
+        raise ValueError(f"projection() name must be a Python identifier, got {name!r}")
+    return _build(protocol, frozen, _freeze_config(config), name)
 
 
 def project(instance: Any, protocol: Callable[..., P]) -> P:
@@ -146,13 +153,14 @@ def _build(
     protocol: type,
     frozen: bool,
     config_items: tuple[tuple[str, Any], ...] | None,
+    name: str | None,
 ) -> type[BaseModel]:
     hints = _collect_field_hints(protocol)
 
     fields: dict[str, Any] = {
-        name: (_substitute(annotation, frozen, config_items), ...)
-        for name, annotation in hints.items()
-        if not name.startswith("_")
+        field: (_substitute(annotation, frozen, config_items), ...)
+        for field, annotation in hints.items()
+        if not field.startswith("_")
     }
 
     if not fields:
@@ -169,7 +177,7 @@ def _build(
     cfg["frozen"] = frozen
 
     return create_model(
-        f"{protocol.__name__}Projection",
+        name or f"{protocol.__name__}Projection",
         __config__=cast("ConfigDict", cfg),
         **fields,
     )
@@ -226,7 +234,7 @@ def _substitute(
 
     def project_protocols(candidate: Any) -> Any:
         if _is_protocol(candidate):
-            return _build(candidate, frozen, config_items)
+            return _build(candidate, frozen, config_items, None)
         return candidate
 
     return map_annotation(annotation, project_protocols)

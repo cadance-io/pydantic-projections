@@ -189,7 +189,7 @@ Both return `{"id":1,"email":"alice@example.com","created_at":"2026-01-01T00:00:
 - Constraints (`min_length`, `gt`, …) and schema documentation (`title`, `description`, `examples`, `json_schema_extra`, `deprecated`) carry over. Pass `metadata=False` for bare annotations.
 - Aliases are dropped by default: a validation alias makes pydantic look the attribute up under a name the source instance does not have, which breaks `from_attributes`. Pass `aliases=True` to carry the source's *serialization* alias, so a dump with `by_alias=True` matches the source's wire format while validation still reads the attribute name.
 - `@computed_field` members are pickable; their return type is used.
-- `name=` overrides the generated Protocol's name (default `f"{Model.__name__}View"`, so `UserView` projects to `UserViewProjection`). Set it when two picks of the same model would otherwise collide in an OpenAPI schema.
+- `name=` overrides the generated Protocol's name (default `f"{Model.__name__}View"`, so `UserView` projects to `UserViewProjection`). Set it when two picks of the same model would otherwise collide in an OpenAPI schema. To name the projection class itself, pass `name=` to `projection()` — see [FastAPI integration](#fastapi-integration).
 - Unknown names raise at `pick()` call time — import time in practice, not on the first request:
 
 ```python
@@ -336,6 +336,15 @@ def get_user(id: int) -> User:
     return db.get_user(id)  # returns the fat User; caller sees only UserSummary's fields
 ```
 
+FastAPI publishes the class name as the OpenAPI schema name, and from there as the type name in every generated client. The default is `f"{Protocol.__name__}Projection"`. Pass `name=` to publish the contract under the name of its server symbol:
+
+```python
+UserResponse = projection(pick(User, "id", "email"), name="UserResponse")
+# -> '#/components/schemas/UserResponse', not 'UserViewProjection'
+```
+
+The name must be a Python identifier, else `projection()` raises `ValueError`. It applies to the outer class only: nested projections keep their default names.
+
 This path still goes through FastAPI's full `serialize_response` + `jsonable_encoder` + `json.dumps` chain every request. Fine for most endpoints.
 
 **High-throughput: `ProjectedResponse`.** For hot paths, return a `ProjectedResponse` instead. It bypasses `serialize_response`/`jsonable_encoder` entirely and emits JSON bytes via two Rust-backed calls (validate, then serialize) on the projection class's `__pydantic_validator__` and `__pydantic_serializer__`, with no `jsonable_encoder` / `json.dumps` step in between:
@@ -394,7 +403,7 @@ MutableSummary = projection(UserSummary, frozen=False)
 
 `frozen` and `config` propagate into every Protocol reachable from the outer one, so an alias generator applied at the top level also camelCases nested projections. `extra="ignore"` and `from_attributes=True` are hard invariants — user-supplied `ConfigDict` cannot override them.
 
-Classes are cached per `(protocol, config, frozen)` triple; config values must be hashable.
+Classes are cached per `(protocol, name, config, frozen)`; config values must be hashable.
 
 ### Error handling
 

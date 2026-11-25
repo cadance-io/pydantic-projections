@@ -16,7 +16,12 @@ from models import (
     UserWithAddressSummary,
 )
 
-from pydantic_projections import ProjectedResponse, ProjectionError, openapi_response
+from pydantic_projections import (
+    ProjectedResponse,
+    ProjectionError,
+    openapi_response,
+    projection,
+)
 
 
 def describe_ProjectedResponse():
@@ -193,3 +198,20 @@ def describe_openapi_response():
                 ]
                 assert ok_ref.endswith("/UserSummaryProjection")
                 assert nf_ref.endswith("/NotFound")
+
+
+def describe_projection_as_response_model():
+    def when_given_a_name():
+        def it_publishes_the_name_as_the_openapi_schema_name():
+            app = FastAPI()
+
+            @app.get("/u", response_model=projection(UserSummary, name="UserResponse"))
+            def get_user() -> object:
+                return User(id=1, name="Alice", email="a@b.c", password_hash="s")
+
+            spec = TestClient(app).get("/openapi.json").json()
+
+            ref = spec["paths"]["/u"]["get"]["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            assert ref == "#/components/schemas/UserResponse"
