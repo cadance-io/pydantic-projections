@@ -61,6 +61,17 @@ def describe_projection_build_errors():
             with pytest.raises(TypeError, match="_Unresolvable"):
                 projection(_Unresolvable)
 
+    def when_a_property_on_the_protocol_references_an_unresolved_forward_name():
+        def it_raises_a_type_error_that_names_the_property():
+            class _UnresolvableProp(Protocol):
+                id: int
+
+                @property
+                def owner(self) -> "DefinitelyNotDefined": ...  # type: ignore[name-defined]  # noqa: F821, UP037
+
+            with pytest.raises(TypeError, match=r"_UnresolvableProp.*\.owner"):
+                projection(_UnresolvableProp)
+
     def when_a_property_on_the_protocol_has_no_return_annotation():
         def it_is_silently_skipped():
             class _Src(BaseModel):

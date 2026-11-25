@@ -198,8 +198,11 @@ def _collect_field_hints(protocol: type) -> dict[str, Any]:
                 continue
             try:
                 prop_hints = get_type_hints(value.fget, include_extras=True)
-            except Exception:  # noqa: S112
-                continue
+            except Exception as exc:
+                raise TypeError(
+                    f"Could not resolve the return annotation of "
+                    f"{protocol!r}.{name}: {exc}"
+                ) from exc
             if "return" in prop_hints:
                 hints[name] = prop_hints["return"]
 
