@@ -16,6 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+    env:
+      # Without it, each `uv run` follows .python-version and tests 3.11.
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - name: Checkout
@@ -31,6 +34,10 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --python ${{ matrix.python-version }}
+
+      - name: Check the Python version
+        run: |
+          uv run python -c "import sys; v = '%d.%d' % sys.version_info[:2]; assert v == '${{ matrix.python-version }}', sys.version"
 
       - name: Validate test structure
         run: uv run python scripts/validate_tests.py

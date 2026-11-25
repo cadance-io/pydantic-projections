@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- A `@property` on a Protocol whose return annotation does not resolve now raises `TypeError` that names the Protocol and the property. Before, `projection()` dropped the property with no error, so the projection published fewer fields than the Protocol declared. An unresolvable attribute annotation already raised `TypeError`. A property with no return annotation is still skipped.
+- A `@property` on a Protocol whose return annotation does not resolve now raises `TypeError` that names the Protocol, the property and the class that declares it. Before, `projection()` dropped the property with no error, so the projection published fewer fields than the Protocol declared. An unresolvable attribute annotation already raised `TypeError`. A property with no return annotation, or with a getter that is not a function (such as `operator.attrgetter`), is still skipped.
+- Every CI job ran its tests on Python 3.11, whatever its matrix version, because each `uv run` followed `.python-version`. The jobs now set `UV_PYTHON`, and a step fails when the interpreter is not the matrix version.
 
 ### Added
 - CI tests Python 3.14, and the package declares the `Python :: 3.14` classifier.

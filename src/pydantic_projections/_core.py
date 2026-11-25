@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from functools import cache
 from typing import (
     TYPE_CHECKING,
@@ -194,14 +195,16 @@ def _collect_field_hints(protocol: type) -> dict[str, Any]:
         for name, value in vars(klass).items():
             if name.startswith("_") or name in hints:
                 continue
-            if not (isinstance(value, property) and value.fget is not None):
+            # A getter that is not a function, such as an attrgetter, carries
+            # no annotation, so it is skipped like an unannotated getter.
+            if not (isinstance(value, property) and inspect.isfunction(value.fget)):
                 continue
             try:
                 prop_hints = get_type_hints(value.fget, include_extras=True)
             except Exception as exc:
                 raise TypeError(
                     f"Could not resolve the return annotation of "
-                    f"{protocol!r}.{name}: {exc}"
+                    f"{protocol!r}.{name} (declared on {klass!r}): {exc}"
                 ) from exc
             if "return" in prop_hints:
                 hints[name] = prop_hints["return"]
