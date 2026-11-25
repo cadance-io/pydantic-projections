@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A `@property` on a Protocol whose return annotation does not resolve now raises `TypeError` that names the Protocol and the property. Before, `projection()` dropped the property with no error, so the projection published fewer fields than the Protocol declared. An unresolvable attribute annotation already raised `TypeError`. A property with no return annotation is still skipped.
+
+### Added
+- CI tests Python 3.14, and the package declares the `Python :: 3.14` classifier.
+
 ## [0.6.1] - 2026-08-05
 
 ### Fixed
