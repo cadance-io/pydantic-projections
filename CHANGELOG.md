@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-25
+
 ### Added
 - A projection class takes its Protocol's docstring, so the published schema carries it as its `description`.
 - `pick(name=...)` raises `ValueError` when another selection already uses the name, because FastAPI would publish two classes with one name under mangled names, with no error. `cache_clear()` frees the names. A default name is not checked.
@@ -92,7 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Class caching per Protocol via `functools.cache`.
 - pytest-describe test suite with AST-based structure validator.
 
-[Unreleased]: https://github.com/cadance-io/pydantic-projections/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/cadance-io/pydantic-projections/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/cadance-io/pydantic-projections/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cadance-io/pydantic-projections/compare/v0.4.0...v0.5.0
