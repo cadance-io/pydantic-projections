@@ -7,13 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A projection class takes its Protocol's docstring, so the published schema carries it as its `description`.
+- `pick(name=...)` raises `ValueError` when another selection already uses the name, because FastAPI would publish two classes with one name under mangled names, with no error. `cache_clear()` frees the names. A default name is not checked.
+- CI tests Python 3.14, and the package declares the `Python :: 3.14` classifier.
+
 ### Changed
 - **Breaking:** a projection class now takes its Protocol's name, without the `Projection` suffix. FastAPI publishes that name as the OpenAPI schema name, so `projection(UserSummary)` now publishes `UserSummary`, not `UserSummaryProjection`, and `pick(User, "id", "email", name="UserResponse")` publishes `UserResponse`, not `UserResponseProjection`. Clients generated from the spec rename their types once. Before, the published contract named the library, and no public API could publish the name of the server symbol. Closes #9.
 - **Breaking:** `pick(name=...)` must be a `str` that is a valid OpenAPI schema key (letters, digits, `.`, `-`, `_`). Another type raises `TypeError`, and another string raises `ValueError`, at `pick()` call time.
 
-### Added
-- A projection class takes its Protocol's docstring, so the published schema carries it as its `description`.
-- `pick(name=...)` raises `ValueError` when another selection already uses the name, because FastAPI would publish two classes with one name under mangled names, with no error. `cache_clear()` frees the names. A default name is not checked.
+### Fixed
+- A `@property` on a Protocol whose return annotation does not resolve now raises `TypeError` that names the Protocol, the property and the class that declares it. Before, `projection()` dropped the property with no error, so the projection published fewer fields than the Protocol declared. An unresolvable attribute annotation already raised `TypeError`. A property with no return annotation, or with a getter that is not a function (such as `operator.attrgetter`), is still skipped.
+- Every CI job ran its tests on Python 3.11, whatever its matrix version, because each `uv run` followed `.python-version`. The jobs now set `UV_PYTHON`, and a step fails when the interpreter is not the matrix version.
 
 ## [0.6.1] - 2026-08-05
 
