@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import operator
 from typing import Protocol
 
 import pytest
@@ -61,6 +62,29 @@ def describe_projection_build_errors():
             with pytest.raises(TypeError, match="_Unresolvable"):
                 projection(_Unresolvable)
 
+    def when_a_property_on_the_protocol_references_an_unresolved_forward_name():
+        def it_raises_a_type_error_that_names_the_property():
+            class _UnresolvableProp(Protocol):
+                id: int
+
+                @property
+                def owner(self) -> "DefinitelyNotDefined": ...  # type: ignore[name-defined]  # noqa: F821, UP037
+
+            with pytest.raises(TypeError, match=r"_UnresolvableProp.*\.owner"):
+                projection(_UnresolvableProp)
+
+        def with_the_property_inherited_from_a_base_protocol():
+            def it_names_the_base_that_declares_it():
+                class _DeclaresOwner(Protocol):
+                    @property
+                    def owner(self) -> "DefinitelyNotDefined": ...  # type: ignore[name-defined]  # noqa: F821, UP037
+
+                class _InheritsOwner(_DeclaresOwner, Protocol):
+                    id: int
+
+                with pytest.raises(TypeError, match=r"declared on .*_DeclaresOwner"):
+                    projection(_InheritsOwner)
+
     def when_a_property_on_the_protocol_has_no_return_annotation():
         def it_is_silently_skipped():
             class _Src(BaseModel):
@@ -77,3 +101,11 @@ def describe_projection_build_errors():
 
             assert "untyped" not in cls.model_fields
             assert cls.model_validate(_Src(name="Alice")).name == "Alice"
+
+    def when_a_property_getter_is_not_a_function():
+        def it_is_skipped_like_an_unannotated_property():
+            class _AttrgetterProp(Protocol):
+                id: int
+                alias = property(operator.attrgetter("id"))
+
+            assert list(projection(_AttrgetterProp).model_fields) == ["id"]
