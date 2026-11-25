@@ -70,10 +70,6 @@ def projection_class() -> type[BaseModel]:
     return projection(UserSummary)
 
 
-def named_projection_class() -> type[BaseModel]:
-    return projection(UserSummary, name="UserResponse")
-
-
 def picked_projection(user: User) -> str:
     return project_json(user, UserView)
 

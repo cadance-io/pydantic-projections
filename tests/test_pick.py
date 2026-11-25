@@ -79,13 +79,43 @@ def describe_pick():
             assert "nickname" not in fields
 
         def it_names_the_projection_after_the_source():
-            assert projection(pick(Account, "id")).__name__ == "AccountViewProjection"
+            assert projection(pick(Account, "id")).__name__ == "AccountView"
 
         def with_an_explicit_name():
             def it_uses_it_for_the_projection_class():
                 picked = pick(Account, "id", name="AccountTeaser")
 
-                assert projection(picked).__name__ == "AccountTeaserProjection"
+                assert projection(picked).__name__ == "AccountTeaser"
+
+            def it_accepts_every_openapi_key_character():
+                picked = pick(Account, "id", name="Account.Teaser-v2_1")
+
+                assert projection(picked).__name__ == "Account.Teaser-v2_1"
+
+            def when_another_selection_already_uses_it():
+                def it_raises_a_value_error():
+                    pick(Account, "id", name="AccountCard")
+
+                    with pytest.raises(ValueError, match="'AccountCard'"):
+                        pick(Account, "email", name="AccountCard")
+
+                def when_the_cache_is_cleared():
+                    def it_accepts_the_name_again():
+                        pick(Account, "id", name="AccountBadge")
+                        cache_clear()
+
+                        assert pick(Account, "email", name="AccountBadge")
+
+            def when_it_is_not_an_openapi_key():
+                @pytest.mark.parametrize("name", ["", "Account Teaser", "a/b"])
+                def it_raises_a_value_error(name):
+                    with pytest.raises(ValueError, match="OpenAPI"):
+                        pick(Account, "id", name=name)
+
+            def when_it_is_not_a_string():
+                def it_raises_a_type_error():
+                    with pytest.raises(TypeError, match="str"):
+                        pick(Account, "id", name=123)  # type: ignore[arg-type]
 
     def when_called_twice():
         def with_the_same_arguments():
@@ -191,7 +221,7 @@ def describe_pick():
 
             defs = projection(picked).model_json_schema()["$defs"]
 
-            assert list(defs) == ["UserWithAddressViewAddressProjection"]
+            assert list(defs) == ["UserWithAddressViewAddress"]
 
         def it_keeps_the_source_order_of_the_head_fields():
             picked = pick(UserWithAddress, "address.street", "id")
