@@ -3,7 +3,16 @@
 
 import ast
 import sys
+import tomllib
 from pathlib import Path
+
+# pytest-describe collects a block only under these prefixes. Inside a block,
+# it collects every other public function as a test.
+with open(Path(__file__).resolve().parent.parent / "pyproject.toml", "rb") as _f:
+    _BLOCK_PREFIXES = tuple(
+        tomllib.load(_f)["tool"]["pytest"]["ini_options"]["describe_prefixes"]
+    )
+_CONDITION_PREFIXES = tuple(p for p in _BLOCK_PREFIXES if p != "describe_")
 
 
 def _parse_file(filepath: Path):
@@ -14,18 +23,35 @@ def _parse_file(filepath: Path):
             return None
 
 
-def _categorize_children(body):
-    result = {"describe": [], "when": [], "given": [], "test": []}
+def _is_fixture(node) -> bool:
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Attribute) and target.attr == "fixture":
+            return True
+        if isinstance(target, ast.Name) and target.id == "fixture":
+            return True
+    return False
+
+
+def _categorize_children(body, *, inside_block: bool = True):
+    """Sort functions the way pytest-describe collects them.
+
+    Inside a block, every public function that is not a block is a test,
+    whatever its name. At module level, only test_*/it_* names count as tests.
+    """
+    result = {"describe": [], "when": [], "test": []}
     for node in body:
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if node.name.startswith("describe_"):
-                result["describe"].append(node)
-            elif node.name.startswith(("when_", "with_", "without_", "for_")):
-                result["when"].append(node)
-            elif node.name.startswith("given_"):
-                result["given"].append(node)
-            elif node.name.startswith(("test_", "it_")):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if node.name.startswith("describe_"):
+            result["describe"].append(node)
+        elif node.name.startswith(_CONDITION_PREFIXES):
+            result["when"].append(node)
+        elif inside_block:
+            if not node.name.startswith("_") and not _is_fixture(node):
                 result["test"].append(node)
+        elif node.name.startswith(("test_", "it_")):
+            result["test"].append(node)
     return result
 
 
@@ -55,7 +81,7 @@ def _validate_module_level(tree: ast.Module, filepath: Path) -> list[str]:
     - No top-level when_* functions
     """
     violations = []
-    children = _categorize_children(tree.body)
+    children = _categorize_children(tree.body, inside_block=False)
 
     if children["test"]:
         test_names = [f.name for f in children["test"]]
@@ -82,7 +108,6 @@ def _validate_describe_block(describe_func, filepath: Path) -> list[str]:
 
     In a describe block, we expect:
     - when_* functions for organizing test scenarios
-    - given_* functions for precondition grouping (contain when_* blocks)
     - OR test_*/it_* functions for simple tests
     - OR nested describe_* for sub-grouping
     - But NOT a mix of when_* and test_*/it_* at the same level
@@ -100,35 +125,10 @@ def _validate_describe_block(describe_func, filepath: Path) -> list[str]:
     if not any(children[k] for k in children):
         violations.append(
             f"{filepath}:{describe_func.lineno} - {describe_func.name} is empty "
-            f"(no when_*, given_*, test_*/it_*, or nested describe_* functions)"
+            f"(no when_*, test_*/it_*, or nested describe_* functions)"
         )
 
     violations.extend(_validate_child_funcs(children, filepath))
-    return violations
-
-
-def _validate_given_block(given_func, filepath: Path) -> list[str]:
-    """Validate a given_* block structure."""
-    violations = []
-    children = _categorize_children(given_func.body)
-
-    if children["describe"]:
-        nested_names = [f.name for f in children["describe"]]
-        violations.append(
-            f"{filepath}:{given_func.lineno} - describe_* inside given "
-            f"{given_func.name}: {', '.join(nested_names)}. "
-            f"describe blocks should be at higher level"
-        )
-
-    if not children["test"] and not children["when"]:
-        violations.append(
-            f"{filepath}:{given_func.lineno} - {given_func.name} has no test_*/it_* "
-            f"functions or nested when_* blocks"
-        )
-
-    violations.extend(
-        _validate_child_funcs(children, filepath, skip={"describe", "given"})
-    )
     return violations
 
 
@@ -145,10 +145,10 @@ def _validate_when_block(when_func, filepath: Path) -> list[str]:
             f"describe blocks should be at higher level"
         )
 
-    if not children["test"] and not children["when"] and not children["given"]:
+    if not children["test"] and not children["when"]:
         violations.append(
             f"{filepath}:{when_func.lineno} - {when_func.name} has no test_*/it_* "
-            f"functions or nested when_*/given_* blocks"
+            f"functions or nested when_* blocks"
         )
 
     violations.extend(_validate_child_funcs(children, filepath, skip={"describe"}))
@@ -165,9 +165,6 @@ def _validate_child_funcs(
     for func in children.get("when", []):
         if "when" not in skip:
             violations.extend(_validate_when_block(func, filepath))
-    for func in children.get("given", []):
-        if "given" not in skip:
-            violations.extend(_validate_given_block(func, filepath))
     for func in children.get("describe", []):
         if "describe" not in skip:
             violations.extend(_validate_describe_block(func, filepath))
@@ -189,15 +186,20 @@ def _validate_embedded_conditions_everywhere(
 
 
 def _validate_test_function(test_func, filepath: Path) -> list[str]:
-    """Validate a test_*/it_* function is a leaf node."""
+    """Validate a collected test is a leaf node.
+
+    A block under an unconfigured prefix, such as and_* or given_*, is collected
+    as one test: it passes without running the tests nested inside it.
+    """
     violations = []
     for node in test_func.body:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if node.name.startswith(("test_", "it_", "when_", "describe_")):
+            if node.name.startswith((*_BLOCK_PREFIXES, "test_", "it_")):
                 violations.append(
-                    f"{filepath}:{test_func.lineno} - Test function {test_func.name} "
-                    f"contains nested function {node.name}. Test functions should be "
-                    f"leaf nodes"
+                    f"{filepath}:{test_func.lineno} - {test_func.name} contains "
+                    f"nested function {node.name}, so pytest-describe collects "
+                    f"{test_func.name} as one test and never runs {node.name}. "
+                    f"Name the block with one of {', '.join(_BLOCK_PREFIXES)}"
                 )
     return violations
 
